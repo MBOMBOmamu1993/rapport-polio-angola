@@ -42,12 +42,20 @@ const C = {
   nvpo2Urbain: 139,
   // nVPO2 — cibles (repli sur cible 0-59 si bloc dédié vide)
   nvpo2CibleDenombre: 144,
-  // nVPO2 — gestion vaccin (flacons reçues / utilisées / rendues / perdus)
-  nvpo2FlaconsRecus: 150,
-  nvpo2FlaconsRendus: 151,
+  // nVPO2 — gestion vaccin. Colonnes réelles du masque :
+  //  149 = Total flacons reçus journalièrement par les équipes (= flacons utilisés,
+  //        base du taux de perte du masque : taux = 1 − vaccinés / (149 × 50))
+  //  150 = Flacons complémentaires reçus (auto, « ne pas remplir »)
+  //  152 = Flacons inutilisables (entamés, cassés, virés…)
+  //  153 = Flacons perdus
+  //  154 = Taux de perte % (calculé par le masque)
+  //  155 = Total de flacons utilisables RESTANTS dans la CDF (stock retourné)
+  nvpo2FlaconsRecusJour: 149,
+  nvpo2FlaconsRecusCompl: 150,
+  nvpo2Inutilisables: 152,
   nvpo2Perdus: 153,
   nvpo2TauxPerte: 154,
-  nvpo2FlaconsUtil: 155,
+  nvpo2StockCDF: 155,
   // VPOb — vaccination 0-59 mois
   vpobZeroDose011: 184,
   vpobZeroDose1259: 187,
@@ -57,12 +65,13 @@ const C = {
   vpobUrbain: 201,
   // VPOb — cibles
   vpobCibleDenombre: 206,
-  // VPOb — gestion vaccin
-  vpobFlaconsRecus: 212,
-  vpobFlaconsRendus: 213,
+  // VPOb — gestion vaccin (mêmes colonnes que nVPO2, doses/flacon = 20)
+  vpobFlaconsRecusJour: 211,
+  vpobFlaconsRecusCompl: 212,
+  vpobInutilisables: 214,
   vpobPerdus: 215,
   vpobTauxPerte: 216,
-  vpobFlaconsUtil: 217,
+  vpobStockCDF: 217,
   // MAPI
   mapiMineures: 222,
   mapiGraves: 223,
@@ -190,6 +199,17 @@ function num(v: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+/**
+ * Normalise un taux de perte lu dans le masque. Le masque le stocke en fraction
+ * (ex. 0,0392 affiché « 3,9 % ») ; on le ramène en pourcentage. Renvoie null si vide.
+ */
+function normTaux(v: unknown): number | null {
+  if (v === "" || v == null) return null;
+  const n = num(v);
+  if (!Number.isFinite(n)) return null;
+  return Math.abs(n) <= 1.5 ? n * 100 : n;
+}
+
 function str(v: unknown): string {
   if (v === null || v === undefined) return "";
   return String(v).trim();
@@ -303,12 +323,12 @@ export function parseMasque(buffer: ArrayBuffer, fileName: string): MasqueData {
       nvpo2CibleExtrap: num(cell(row, C.cible059)),
       nvpo2CibleDenombre: num(cell(row, C.nvpo2CibleDenombre)),
       nvpo2ZeroDose: num(cell(row, C.nvpo2ZeroDose011)) + num(cell(row, C.nvpo2ZeroDose1259)),
-      nvpo2FlaconsRecus: num(cell(row, C.nvpo2FlaconsRecus)),
-      nvpo2FlaconsRendus: num(cell(row, C.nvpo2FlaconsRendus)),
+      nvpo2FlaconsRecus: num(cell(row, C.nvpo2FlaconsRecusJour)) + num(cell(row, C.nvpo2FlaconsRecusCompl)),
+      nvpo2FlaconsRendus: num(cell(row, C.nvpo2StockCDF)),
       nvpo2Perdus: num(cell(row, C.nvpo2Perdus)),
-      nvpo2FlaconsUtil: num(cell(row, C.nvpo2FlaconsUtil)),
-      nvpo2TauxPerte:
-        nvpo2TauxPerteRaw === "" || nvpo2TauxPerteRaw == null ? null : num(nvpo2TauxPerteRaw),
+      // Base du taux de perte du masque : flacons reçus journalièrement (× 50 doses).
+      nvpo2FlaconsUtil: num(cell(row, C.nvpo2FlaconsRecusJour)),
+      nvpo2TauxPerte: normTaux(nvpo2TauxPerteRaw),
       nvpo2Rural: num(cell(row, C.nvpo2Rural)),
       nvpo2Urbain: num(cell(row, C.nvpo2Urbain)),
       nvpo2Daily,
@@ -316,12 +336,12 @@ export function parseMasque(buffer: ArrayBuffer, fileName: string): MasqueData {
       vpobCibleExtrap: num(cell(row, C.cible059)),
       vpobCibleDenombre: num(cell(row, C.vpobCibleDenombre)),
       vpobZeroDose: num(cell(row, C.vpobZeroDose011)) + num(cell(row, C.vpobZeroDose1259)),
-      vpobFlaconsRecus: num(cell(row, C.vpobFlaconsRecus)),
-      vpobFlaconsRendus: num(cell(row, C.vpobFlaconsRendus)),
+      vpobFlaconsRecus: num(cell(row, C.vpobFlaconsRecusJour)) + num(cell(row, C.vpobFlaconsRecusCompl)),
+      vpobFlaconsRendus: num(cell(row, C.vpobStockCDF)),
       vpobPerdus: num(cell(row, C.vpobPerdus)),
-      vpobFlaconsUtil: num(cell(row, C.vpobFlaconsUtil)),
-      vpobTauxPerte:
-        vpobTauxPerteRaw === "" || vpobTauxPerteRaw == null ? null : num(vpobTauxPerteRaw),
+      // Base du taux de perte du masque : flacons reçus journalièrement (× 20 doses).
+      vpobFlaconsUtil: num(cell(row, C.vpobFlaconsRecusJour)),
+      vpobTauxPerte: normTaux(vpobTauxPerteRaw),
       vpobRural: num(cell(row, C.vpobRural)),
       vpobUrbain: num(cell(row, C.vpobUrbain)),
       vpobDaily,
