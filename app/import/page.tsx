@@ -71,8 +71,8 @@ export default function ImportPage() {
       <section className="overflow-hidden rounded-2xl navy-bar text-white shadow-navy">
         <div className="grid grid-cols-1 items-center gap-4 px-6 py-8 md:grid-cols-[auto_1fr] md:gap-6">
           <div className="flex items-center justify-center gap-3 md:justify-start">
-            <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-white/95 p-2 shadow-card">
-              <Image src="/logo/pev.png" alt="PEV" width={64} height={64} className="h-16 w-16 object-contain" />
+            <div className="flex h-24 w-24 items-center justify-center">
+              <Image src="/logo/pev-transparent.png" alt="PEV" width={96} height={96} className="h-24 w-24 object-contain" />
             </div>
           </div>
           <div className="text-center md:text-left">

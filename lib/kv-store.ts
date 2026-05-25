@@ -6,10 +6,30 @@
  * provinces/antennes/ZS différentes écrivent des clés distinctes (pas de collision).
  */
 
-import { kv } from "@vercel/kv";
+import { createClient, type VercelKV } from "@vercel/kv";
 import type { ASRecord, MasqueData } from "./parse-masque";
 
 const INDEX_KEY = "polio:zs:index";
+
+/**
+ * Résout les identifiants du store, quel que soit le nommage de l'intégration :
+ * - Vercel KV « classique » : KV_REST_API_URL / KV_REST_API_TOKEN
+ * - Upstash for Redis (Marketplace) : UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN
+ */
+function kvCreds(): { url?: string; token?: string } {
+  const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+  return { url, token };
+}
+
+let _kv: VercelKV | null = null;
+function kvClient(): VercelKV {
+  if (_kv) return _kv;
+  const { url, token } = kvCreds();
+  if (!url || !token) throw new Error("Vercel KV non configuré");
+  _kv = createClient({ url, token });
+  return _kv;
+}
 
 export interface ZSBlock {
   province: string;
@@ -22,7 +42,8 @@ export interface ZSBlock {
 }
 
 export function kvAvailable(): boolean {
-  return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
+  const { url, token } = kvCreds();
+  return Boolean(url && token);
 }
 
 function slug(s: string): string {
@@ -54,6 +75,7 @@ export async function upsertImport(data: MasqueData): Promise<{ updatedZones: st
     g.records.push(r);
   }
 
+  const kv = kvClient();
   const keys = Array.from(groups.keys());
   await Promise.all([
     ...Array.from(groups.entries()).map(([k, block]) => kv.set(k, block)),
@@ -65,6 +87,7 @@ export async function upsertImport(data: MasqueData): Promise<{ updatedZones: st
 
 /** Lit tous les blocs ZS du pays. */
 export async function readNationalBlocks(): Promise<ZSBlock[]> {
+  const kv = kvClient();
   const keys = await kv.smembers(INDEX_KEY);
   if (!keys || keys.length === 0) return [];
   const values = await kv.mget<ZSBlock[]>(...keys);

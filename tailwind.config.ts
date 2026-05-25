@@ -11,19 +11,19 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // Bleu navy / marine — palette principale.
+        // Bleu navy / marine — palette principale (aligné sur le bleu OMS / OneWHO).
         navy: {
-          50: "#eef2f9",
-          100: "#dce5f3",
-          200: "#b3c4e3",
-          300: "#869fd0",
-          400: "#5a7abc",
-          500: "#2e55a8",
-          600: "#1f4490",
-          700: "#1f3864", // navy header du modèle
-          800: "#162a4d",
-          900: "#0a1733",
-          950: "#040b1c",
+          50: "#e9eef8",
+          100: "#cdd9f0",
+          200: "#9db4e0",
+          300: "#6889cf",
+          400: "#3a62ba",
+          500: "#1842a0",
+          600: "#0a3286",
+          700: "#002a72", // navy header OMS
+          800: "#001b4d",
+          900: "#00112f",
+          950: "#00081a",
         },
         // Accent bleu vif (boutons primaires, liens).
         accent: {
