@@ -71,8 +71,8 @@ export default function ImportPage() {
       <section className="overflow-hidden rounded-2xl navy-bar text-white shadow-navy">
         <div className="grid grid-cols-1 items-center gap-4 px-6 py-8 md:grid-cols-[auto_1fr] md:gap-6">
           <div className="flex items-center justify-center gap-3 md:justify-start">
-            <div className="flex items-center justify-center">
-              <Image src="/logo/pev-logo-white.svg" alt="PEV — Programme Élargi de Vaccination" width={420} height={90} className="h-16 w-auto md:h-20" priority />
+            <div className="inline-flex items-center rounded-xl bg-white px-4 py-3 shadow-card">
+              <Image src="/logo/pev-officiel.png" alt="PEV — Programme Élargi de Vaccination" width={326} height={50} className="h-11 w-auto md:h-14" priority />
             </div>
           </div>
           <div className="text-center md:text-left">
