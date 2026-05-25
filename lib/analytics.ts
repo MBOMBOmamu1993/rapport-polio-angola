@@ -174,13 +174,13 @@ export function totals(records: ASRecord[]): Totals {
   const menagesPrevus = s((r) => r.menagesPrevus);
   const menagesVisites = s((r) => r.menagesVisites);
 
-  // Taux de perte = doses perdues / doses servies (flacons util.). Si non disponible
-  // ligne par ligne, on agrège perdus/utilisés. nVPO2 : 20 doses/flacon, VPOb : 20.
+  void nvpo2Perdus;
+  void vpobPerdus;
   return {
     nvpo2Vacc, nvpo2Cible, nvpo2CV: pct(nvpo2Vacc, nvpo2Cible),
     vpobVacc, vpobCible, vpobCV: pct(vpobVacc, vpobCible),
-    nvpo2FlaconsUtil, nvpo2TauxPerte: lossRate(nvpo2Perdus, nvpo2FlaconsUtil),
-    vpobFlaconsUtil, vpobTauxPerte: lossRate(vpobPerdus, vpobFlaconsUtil),
+    nvpo2FlaconsUtil, nvpo2TauxPerte: tauxPerte(nvpo2Vacc, nvpo2FlaconsUtil, NVPO2_DOSES_PAR_FLACON),
+    vpobFlaconsUtil, vpobTauxPerte: tauxPerte(vpobVacc, vpobFlaconsUtil, VPOB_DOSES_PAR_FLACON),
     vaccAttendus, vaccRecus, completude: pct(vaccRecus, vaccAttendus),
     recup: s((r) => r.recup),
     nvpo2ZeroDose: s((r) => r.nvpo2ZeroDose),
@@ -193,9 +193,48 @@ export function totals(records: ASRecord[]): Totals {
   };
 }
 
-function lossRate(perdus: number, utilises: number): number | null {
-  if (!utilises) return null;
-  return (perdus / utilises) * 100;
+// Doses par flacon (co-administration polio). Le modèle officiel calcule le taux
+// de perte sur la base des doses : taux = 1 − vaccinés / (flacons utilisés × doses).
+export const NVPO2_DOSES_PAR_FLACON = 50;
+export const VPOB_DOSES_PAR_FLACON = 20;
+
+export function tauxPerte(vacc: number, flaconsUtil: number, dosesParFlacon: number): number | null {
+  if (!flaconsUtil) return null;
+  return (1 - vacc / (flaconsUtil * dosesParFlacon)) * 100;
+}
+
+export interface CoverageRow {
+  unit: string;
+  cible: number;
+  vacc: number;
+  cv: number | null;
+}
+
+export interface GestionRow {
+  unit: string;
+  flaconsUtil: number;
+  perdus: number;
+  vacc: number;
+  taux: number | null;
+}
+
+export function nvpo2Coverage(byUnit: UnitAgg[]): CoverageRow[] {
+  return byUnit.map((a) => ({ unit: a.unit, cible: a.nvpo2Cible, vacc: a.nvpo2Vacc, cv: pct(a.nvpo2Vacc, a.nvpo2Cible) }));
+}
+export function vpobCoverage(byUnit: UnitAgg[]): CoverageRow[] {
+  return byUnit.map((a) => ({ unit: a.unit, cible: a.vpobCible, vacc: a.vpobVacc, cv: pct(a.vpobVacc, a.vpobCible) }));
+}
+export function nvpo2Gestion(byUnit: UnitAgg[]): GestionRow[] {
+  return byUnit.map((a) => ({
+    unit: a.unit, flaconsUtil: a.nvpo2FlaconsUtil, perdus: a.nvpo2Perdus, vacc: a.nvpo2Vacc,
+    taux: tauxPerte(a.nvpo2Vacc, a.nvpo2FlaconsUtil, NVPO2_DOSES_PAR_FLACON),
+  }));
+}
+export function vpobGestion(byUnit: UnitAgg[]): GestionRow[] {
+  return byUnit.map((a) => ({
+    unit: a.unit, flaconsUtil: a.vpobFlaconsUtil, perdus: a.vpobPerdus, vacc: a.vpobVacc,
+    taux: tauxPerte(a.vpobVacc, a.vpobFlaconsUtil, VPOB_DOSES_PAR_FLACON),
+  }));
 }
 
 function uniq(arr: string[]): string[] {

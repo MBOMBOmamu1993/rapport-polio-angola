@@ -7,6 +7,10 @@ import {
   applyFilters,
   aggregateByUnit,
   cascadeOptions,
+  nvpo2Coverage,
+  vpobCoverage,
+  nvpo2Gestion,
+  vpobGestion,
   resolveDrillLevel,
   scopeLabel,
   totals,
@@ -14,7 +18,7 @@ import {
 import { fmtInt, fmtPct } from "@/lib/format";
 import { fetchNational } from "@/lib/national";
 import type { MasqueData } from "@/lib/parse-masque";
-import type { ProblemeRow, ReportData, UnitValue } from "@/lib/export-report-pptx";
+import type { ProblemeRow, ReportData } from "@/lib/export-report-pptx";
 
 const DEFAULT_PROBLEMES: ProblemeRow[] = [
   {
@@ -88,10 +92,11 @@ export default function RapportPage() {
   }
 
   function buildReport(): ReportData {
-    const toUV = (sel: (a: ReturnType<typeof aggregateByUnit>[number]) => number | null): UnitValue[] =>
-      byUnit.map((a) => ({ unit: a.unit, value: sel(a) }));
-
-    const pctOrNull = (p: number, w: number) => (w ? (p / w) * 100 : null);
+    const completudeByUnit = byUnit.map((a) => ({
+      unit: a.unit,
+      value: a.vaccAttendus ? (a.vaccRecus / a.vaccAttendus) * 100 : null,
+    }));
+    const recupByUnit = byUnit.map((a) => ({ unit: a.unit, value: a.recup }));
 
     return {
       province: filters.province ?? data!.meta.province,
@@ -117,19 +122,13 @@ export default function RapportPage() {
         mapiMineures: t.mapiMineures,
         mapiGraves: t.mapiGraves,
       },
-      completudeByUnit: toUV((a) => pctOrNull(a.vaccRecus, a.vaccAttendus)),
-      nvpo2CVByUnit: toUV((a) => pctOrNull(a.nvpo2Vacc, a.nvpo2Cible)),
-      vpobCVByUnit: toUV((a) => pctOrNull(a.vpobVacc, a.vpobCible)),
-      recupByUnit: toUV((a) => a.recup),
-      nvpo2PerteByUnit: toUV((a) => pctOrNull(a.nvpo2Perdus, a.nvpo2FlaconsUtil)),
-      vpobPerteByUnit: toUV((a) => pctOrNull(a.vpobPerdus, a.vpobFlaconsUtil)),
+      completudeByUnit,
+      nvpo2Coverage: nvpo2Coverage(byUnit),
+      vpobCoverage: vpobCoverage(byUnit),
+      nvpo2Gestion: nvpo2Gestion(byUnit),
+      vpobGestion: vpobGestion(byUnit),
+      recupByUnit,
       problemes,
-      commentNvpo2: `Couverture vaccinale nVPO2 de ${fmtPct(t.nvpo2CV)} sur le périmètre sélectionné${
-        t.nvpo2CV !== null && t.nvpo2CV < 95 ? " — des zones restent sous le seuil de 95 %." : "."
-      }`,
-      commentVpob: `Couverture vaccinale VPOb de ${fmtPct(t.vpobCV)} sur le périmètre sélectionné${
-        t.vpobCV !== null && t.vpobCV < 95 ? " — poursuivre les passages de rattrapage." : "."
-      }`,
     };
   }
 
@@ -137,8 +136,27 @@ export default function RapportPage() {
     setBusy(true);
     setDone(false);
     try {
+      const report = buildReport();
+      // Carte choroplèthe de la complétude par ZS (best-effort, rendu navigateur).
+      try {
+        const { renderZSMap, normalizeZS } = await import("@/lib/zs-map");
+        const byZS = new Map<string, { att: number; rec: number }>();
+        for (const r of filtered) {
+          const k = normalizeZS(r.zs);
+          if (!k) continue;
+          const acc = byZS.get(k) ?? { att: 0, rec: 0 };
+          acc.att += r.vaccAttendus;
+          acc.rec += r.vaccRecus;
+          byZS.set(k, acc);
+        }
+        const completudeByZS = new Map<string, number>();
+        for (const [k, v] of byZS) if (v.att > 0) completudeByZS.set(k, (v.rec / v.att) * 100);
+        report.completudeMapPng = completudeByZS.size > 0 ? await renderZSMap(completudeByZS) : null;
+      } catch {
+        report.completudeMapPng = null;
+      }
       const { exportReportPPT } = await import("@/lib/export-report-pptx");
-      await exportReportPPT(buildReport());
+      await exportReportPPT(report);
       setDone(true);
     } finally {
       setBusy(false);
