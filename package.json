@@ -1,0 +1,36 @@
+{
+  "name": "rapport-polio-angola",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Rapport de la campagne de vaccination polio synchronisée avec l'Angola — import du masque de saisie et génération du rapport PowerPoint.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start -p 3000",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@vercel/kv": "^3.0.0",
+    "clsx": "^2.1.1",
+    "next": "14.2.13",
+    "pptxgenjs": "^4.0.1",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "tailwind-merge": "^2.5.2",
+    "xlsx": "^0.18.5",
+    "zustand": "^4.5.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.10",
+    "@types/react": "18.3.11",
+    "@types/react-dom": "18.3.0",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.13",
+    "typescript": "5.6.2"
+  },
+  "engines": {
+    "node": ">=18.18.0"
+  }
+}
