@@ -24,7 +24,7 @@ import { fetchNational } from "@/lib/national";
 import { ANTIGENES, type MasqueData } from "@/lib/parse-masque";
 import type { CompletudeRow, ProblemeRow, ReportData } from "@/lib/export-report-pptx";
 
-/** Concatène une liste de ZS en limitant la longueur affichée. */
+/** Concatène une liste d'unités (AS/ZS) en limitant la longueur affichée. */
 function joinUnits(names: string[], max = 8): string {
   if (names.length === 0) return "—";
   if (names.length <= max) return names.join(", ");
@@ -32,26 +32,29 @@ function joinUnits(names: string[], max = 8): string {
 }
 
 /**
- * Déduit les problèmes rencontrés directement des analyses, par unité (ZS le plus
- * souvent). Chaque problème liste les unités réellement concernées et propose une
- * piste de solution cohérente avec l'anomalie détectée.
+ * Déduit dynamiquement les problèmes à partir des analyses, au niveau de
+ * désagrégation courant (`unitLabel` = Aire de Santé, Zone de Santé, etc.).
+ * Chaque problème liste les unités réellement concernées et propose une action
+ * correctrice cohérente. La saisie des données est assurée par les gestionnaires
+ * de données (DATA) — il n'y a pas de collecteurs pour cette campagne.
  */
-function computeProblemes(byUnit: UnitAgg[], t: Totals): ProblemeRow[] {
+function computeProblemes(byUnit: UnitAgg[], t: Totals, unitLabel: string): ProblemeRow[] {
   const out: ProblemeRow[] = [];
-  const NV_SEUIL = 11; // seuil de perte nVPO2 (%)
-  const VP_SEUIL = 10; // seuil de perte VPOb (%)
+  const NV_SEUIL = 11; // seuil acceptable de perte nVPO2 (%)
+  const VP_SEUIL = 10; // seuil acceptable de perte VPOb (%)
+  const perimetre = `Ensemble du périmètre (${unitLabel.toLowerCase()})`;
 
-  // 1. Complétude des rapports insuffisante (< 95 %).
+  // 1. Complétude des rapports de vaccination insuffisante (< 95 %).
   const complBas = byUnit
     .filter((u) => u.vaccAttendus > 0 && (u.vaccRecus / u.vaccAttendus) * 100 < 95)
     .sort((a, b) => a.vaccRecus / a.vaccAttendus - b.vaccRecus / b.vaccAttendus)
     .map((u) => u.unit);
   if (complBas.length > 0) {
     out.push({
-      probleme: "Complétude des rapports insuffisante (< 95 %)",
-      causes: "Faible remontée des données : zones sans réseau Internet, retard de transmission des collecteurs",
+      probleme: "Complétude des rapports de vaccination insuffisante (< 95 %)",
+      causes: "Transmission tardive ou incomplète des rapports journaliers ; couverture réseau limitée pour la saisie ; indisponibilité ponctuelle des gestionnaires de données (DATA)",
       zs: joinUnits(complBas),
-      solutions: "Tracer les collecteurs et BCZ retardataires, sécuriser la transmission (relais radio/moto), valider les rapports manquants au J+1",
+      solutions: "Relancer les DATA et les BCZ concernés, sécuriser la chaîne de transmission des rapports et consolider les rapports manquants au plus tard à J+1",
     });
   }
 
@@ -63,9 +66,9 @@ function computeProblemes(byUnit: UnitAgg[], t: Totals): ProblemeRow[] {
   if (nvBas.length > 0) {
     out.push({
       probleme: "Couverture vaccinale nVPO2 sous l'objectif (< 95 %)",
-      causes: "Enfants absents/non atteints, refus, sites difficiles d'accès, démarrage tardif des équipes",
+      causes: "Enfants absents ou non atteints, refus parentaux, sites d'accès difficile, déploiement tardif des équipes",
       zs: joinUnits(nvBas),
-      solutions: "Organiser des passages de ratissage ciblés, renforcer la mobilisation sociale et le porte-à-porte dans les aires faibles",
+      solutions: "Planifier des passages de ratissage ciblés et renforcer la mobilisation sociale et le porte-à-porte dans les aires sous-performantes",
     });
   }
 
@@ -77,13 +80,38 @@ function computeProblemes(byUnit: UnitAgg[], t: Totals): ProblemeRow[] {
   if (vpBas.length > 0) {
     out.push({
       probleme: "Couverture vaccinale VPOb sous l'objectif (< 95 %)",
-      causes: "Co-administration incomplète, ruptures ponctuelles de VPOb, enfants déjà partis",
+      causes: "Co-administration incomplète, ruptures ponctuelles d'approvisionnement en VPOb, enfants déjà partis du site",
       zs: joinUnits(vpBas),
-      solutions: "Assurer la co-administration systématique nVPO2 + VPOb, réapprovisionner les sites et planifier le rattrapage",
+      solutions: "Garantir la co-administration systématique nVPO2 + VPOb, réapprovisionner les sites en rupture et planifier le rattrapage",
     });
   }
 
-  // 4. Taux de perte nVPO2 hors seuil (> 11 % ou négatif).
+  // 4. Incohérence de couverture nVPO2 vs VPOb (co-administration).
+  // Les deux antigènes sont co-administrés à la même cible le même jour : leurs
+  // couvertures doivent être identiques ; un écart traduit une erreur de saisie.
+  const coAdminEcart = byUnit
+    .filter((u) => {
+      if (u.nvpo2Cible <= 0 || u.vpobCible <= 0) return false;
+      const cvN = (u.nvpo2Vacc / u.nvpo2Cible) * 100;
+      const cvV = (u.vpobVacc / u.vpobCible) * 100;
+      return Math.abs(cvN - cvV) >= 0.1;
+    })
+    .sort((a, b) => {
+      const da = Math.abs(a.nvpo2Vacc / a.nvpo2Cible - a.vpobVacc / a.vpobCible);
+      const db = Math.abs(b.nvpo2Vacc / b.nvpo2Cible - b.vpobVacc / b.vpobCible);
+      return db - da;
+    })
+    .map((u) => u.unit);
+  if (coAdminEcart.length > 0) {
+    out.push({
+      probleme: "Incohérence de couverture entre nVPO2 et VPOb (co-administration)",
+      causes: "nVPO2 et VPOb étant co-administrés à la même cible le même jour, leurs couvertures devraient être strictement égales ; l'écart observé traduit une erreur de saisie des effectifs vaccinés",
+      zs: joinUnits(coAdminEcart),
+      solutions: "Faire recroiser par les DATA les effectifs vaccinés nVPO2 et VPOb et corriger la saisie afin d'aligner les deux couvertures",
+    });
+  }
+
+  // 5. Taux de perte nVPO2 hors seuil (> 11 % ou négatif).
   const nvPerte = byUnit
     .filter((u) => {
       const x = tauxPerte(u.nvpo2Vacc, u.nvpo2FlaconsUtil, NVPO2_DOSES_PAR_FLACON);
@@ -93,13 +121,13 @@ function computeProblemes(byUnit: UnitAgg[], t: Totals): ProblemeRow[] {
   if (nvPerte.length > 0) {
     out.push({
       probleme: `Taux de perte nVPO2 hors seuil (> ${NV_SEUIL} % ou négatif)`,
-      causes: "Saisie irrégulière des flacons utilisés/rendus, rupture de chaîne du froid, flacons entamés non terminés",
+      causes: "Saisie incohérente des flacons (reçus / utilisés / restitués), maîtrise insuffisante de la chaîne du froid, gestion non conforme des flacons entamés",
       zs: joinUnits(nvPerte),
-      solutions: "Reprendre la saisie flacons reçus/utilisés/rendus, renforcer la gestion de la chaîne du froid et la politique des flacons entamés",
+      solutions: "Faire fiabiliser par les DATA la saisie des mouvements de flacons, renforcer la gestion de la chaîne du froid et appliquer la politique des flacons entamés",
     });
   }
 
-  // 5. Taux de perte VPOb hors seuil (> 10 % ou négatif).
+  // 6. Taux de perte VPOb hors seuil (> 10 % ou négatif).
   const vpPerte = byUnit
     .filter((u) => {
       const x = tauxPerte(u.vpobVacc, u.vpobFlaconsUtil, VPOB_DOSES_PAR_FLACON);
@@ -109,57 +137,57 @@ function computeProblemes(byUnit: UnitAgg[], t: Totals): ProblemeRow[] {
   if (vpPerte.length > 0) {
     out.push({
       probleme: `Taux de perte VPOb hors seuil (> ${VP_SEUIL} % ou négatif)`,
-      causes: "Saisie irrégulière des flacons, flacons multidoses partiellement utilisés, conservation inadéquate",
+      causes: "Saisie incohérente des flacons, flacons multidoses partiellement utilisés, conditions de conservation inadéquates",
       zs: joinUnits(vpPerte),
-      solutions: "Fiabiliser la saisie des flacons VPOb, respecter la durée d'utilisation après ouverture et la chaîne du froid",
+      solutions: "Faire fiabiliser par les DATA la saisie des flacons VPOb, respecter le délai d'utilisation après ouverture et la chaîne du froid",
     });
   }
 
-  // 6. MAPI graves notifiées.
+  // 7. MAPI graves notifiées.
   if (t.mapiGraves > 0) {
     out.push({
       probleme: `MAPI graves notifiées (${t.mapiGraves})`,
-      causes: "Manifestations indésirables post-immunisation requérant investigation",
-      zs: "Voir slide Surveillance des MAPI",
-      solutions: "Investiguer chaque cas sous 48 h, notifier au niveau supérieur, assurer la prise en charge médicale et la communication de crise",
+      causes: "Manifestations adverses post-immunisation graves nécessitant une investigation immédiate",
+      zs: "Voir diapositive « Surveillance des MAPI »",
+      solutions: "Investiguer chaque cas sous 48 h, notifier au niveau hiérarchique supérieur, assurer la prise en charge médicale et la communication de crise",
     });
   }
 
   const vaccTotal = t.nvpo2Vacc + t.vpobVacc;
 
-  // 7. Non-rapportage des enfants récupérés en PEV de routine.
+  // 8. Non-rapportage des enfants récupérés en PEV de routine.
   const recupTotal = t.antigenesEV.reduce((a, b) => a + b, 0);
   if (vaccTotal > 0 && t.recup === 0 && recupTotal === 0) {
     out.push({
-      probleme: "Non-rapportage des enfants récupérés en PEV de routine",
-      causes: "Volet récupération PEV non rempli dans le masque malgré une campagne réalisée (co-administration non tracée)",
-      zs: "Toutes les ZS du périmètre",
-      solutions: "Sensibiliser les équipes à enregistrer systématiquement les antigènes de routine administrés et compléter le volet récupération PEV",
+      probleme: "Non-rapportage de la récupération PEV de routine",
+      causes: "Volet « récupération PEV de routine » non renseigné dans le masque alors que la vaccination a été réalisée (co-administration non documentée)",
+      zs: perimetre,
+      solutions: "Sensibiliser les équipes et les DATA à l'enregistrement systématique des antigènes de routine co-administrés pendant la campagne",
     });
   }
 
-  // 8. Non-notification de la surveillance des MEV (MPV).
+  // 9. Non-notification de la surveillance des MEV (MPV).
   const survTotal = t.survPFA + t.survRougeole + t.survFJ + t.survTNN;
   if (vaccTotal > 0 && survTotal === 0) {
     out.push({
       probleme: "Non-notification de la surveillance des MEV (MPV)",
-      causes: "Aucun cas PFA / Rougeole / Fièvre Jaune / TNN notifié — recherche active probablement non documentée",
-      zs: "Toutes les ZS du périmètre",
-      solutions: "Renforcer la recherche active des cas de MEV pendant la campagne et documenter même les notifications « zéro cas »",
+      causes: "Aucun cas PFA / Rougeole / Fièvre Jaune / TNN notifié : recherche active des cas non documentée pendant la campagne",
+      zs: perimetre,
+      solutions: "Renforcer la recherche active des cas de MEV et documenter la surveillance, y compris les notifications « zéro cas »",
     });
   }
 
-  // 9. Non-notification des MAPI.
+  // 10. Non-notification des MAPI.
   if (vaccTotal > 0 && t.mapiMineures === 0 && t.mapiGraves === 0) {
     out.push({
       probleme: "Non-notification des MAPI",
-      causes: "Aucune MAPI (mineure ou grave) notifiée malgré le volume de doses administrées — sous-notification probable",
-      zs: "Toutes les ZS du périmètre",
-      solutions: "Rappeler aux équipes la notification systématique des MAPI, y compris les manifestations mineures, et documenter le « zéro cas »",
+      causes: "Aucune MAPI (mineure ou grave) notifiée malgré le volume de doses administrées : sous-notification probable",
+      zs: perimetre,
+      solutions: "Rappeler aux équipes la notification systématique des MAPI, y compris mineures, et documenter le « zéro cas »",
     });
   }
 
-  // 10. Incohérences des données (taux de perte négatif / complétude > 100 %).
+  // 11. Incohérences des données saisies (taux négatif / reçus > attendus).
   const incoh = byUnit
     .filter((u) => {
       const nv = tauxPerte(u.nvpo2Vacc, u.nvpo2FlaconsUtil, NVPO2_DOSES_PAR_FLACON);
@@ -172,9 +200,9 @@ function computeProblemes(byUnit: UnitAgg[], t: Totals): ProblemeRow[] {
   if (incoh.length > 0) {
     out.push({
       probleme: "Incohérences des données saisies",
-      causes: "Enfants vaccinés supérieurs aux doses disponibles (taux de perte négatif) ou rapports reçus > attendus : erreurs de saisie flacons / dénombrement",
+      causes: "Effectifs vaccinés supérieurs aux doses disponibles (taux de perte négatif) ou rapports reçus supérieurs aux attendus : erreurs de saisie des flacons ou des cibles",
       zs: joinUnits(incoh),
-      solutions: "Vérifier et corriger la saisie des flacons utilisés et des cibles dans le masque, recroiser avec les fiches de pointage",
+      solutions: "Faire vérifier et corriger par les DATA la saisie des flacons et des cibles dans le masque, par recoupement avec les fiches de pointage",
     });
   }
 
@@ -213,7 +241,7 @@ export default function RapportPage() {
 
   // Problèmes déduits automatiquement des analyses (recalculés à chaque changement
   // de périmètre). L'utilisateur peut ensuite les ajuster manuellement.
-  const autoProblemes = useMemo(() => computeProblemes(byUnit, t), [byUnit, t]);
+  const autoProblemes = useMemo(() => computeProblemes(byUnit, t, drill.label), [byUnit, t, drill.label]);
   useEffect(() => {
     setProblemes(autoProblemes);
   }, [autoProblemes]);
@@ -482,7 +510,7 @@ export default function RapportPage() {
             <div key={i} className="grid grid-cols-1 gap-2 rounded-lg border border-surface-200 p-2 md:grid-cols-[1fr_1fr_120px_1fr_auto]">
               <Field placeholder="Problème identifié" value={p.probleme} onChange={(v) => editRow(setProblemes, i, "probleme", v)} />
               <Field placeholder="Causes" value={p.causes} onChange={(v) => editRow(setProblemes, i, "causes", v)} />
-              <Field placeholder="ZS" value={p.zs} onChange={(v) => editRow(setProblemes, i, "zs", v)} />
+              <Field placeholder="Unité(s) concernée(s)" value={p.zs} onChange={(v) => editRow(setProblemes, i, "zs", v)} />
               <Field placeholder="Solutions proposées" value={p.solutions} onChange={(v) => editRow(setProblemes, i, "solutions", v)} />
               <button
                 onClick={() => setProblemes((arr) => arr.filter((_, j) => j !== i))}

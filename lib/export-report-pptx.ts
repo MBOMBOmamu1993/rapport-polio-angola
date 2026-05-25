@@ -881,7 +881,9 @@ function buildMapi(ctx: SlideCtx): void {
 
 function buildProblemes(ctx: SlideCtx): void {
   const { pptx, data } = ctx;
-  const head: PptxGenJS.TableCell[] = ["Problèmes identifiés", "Causes", "ZS concernées", "Solutions proposées"]
+  // Pluralise le premier mot du libellé d'unité (Aire de Santé → Aires de Santé).
+  const concLabel = `${data.byUnitLabel.replace(/^(\S+)/, "$1s")} concernées`;
+  const head: PptxGenJS.TableCell[] = ["Problèmes identifiés", "Causes", concLabel, "Solutions proposées"]
     .map((h) => ({ text: h, options: thHeader({ fontSize: 15 }) }));
 
   if (data.problemes.length === 0) {
