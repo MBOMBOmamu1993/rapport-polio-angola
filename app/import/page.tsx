@@ -30,9 +30,8 @@ export default function ImportPage() {
     try {
       const buf = await file.arrayBuffer();
       const parsed = parseMasque(buf, file.name);
-      setData(parsed); // remplace l'ancienne version par la nouvelle (local)
+      setData(parsed);
       setToast({ kind: "ok", msg: "Masque de saisie importé avec succès" });
-      // Synchronisation vers la compilation nationale (best-effort).
       setSync("syncing");
       const r = await pushImport(parsed);
       setSync(r.ok ? "ok" : "local");
@@ -58,7 +57,7 @@ export default function ImportPage() {
       {/* Toast */}
       {toast && (
         <div
-          className={`animate-slidein fixed left-1/2 top-20 z-50 flex -translate-x-1/2 items-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold text-white shadow-lg ${
+          className={`animate-slidein fixed left-1/2 top-20 z-50 flex -translate-x-1/2 items-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold text-white shadow-navy ${
             toast.kind === "ok" ? "bg-good-500" : "bg-danger-500"
           }`}
           role="status"
@@ -68,16 +67,25 @@ export default function ImportPage() {
         </div>
       )}
 
-      {/* Hero */}
-      <section className="overflow-hidden rounded-2xl border border-oms-100 bg-gradient-to-br from-oms-600 to-oms-800 text-white shadow-card">
-        <div className="flex flex-col items-center gap-3 px-6 py-8 text-center">
-          <Image src="/logo/pev.png" alt="PEV" width={64} height={64} className="h-16 w-16 rounded-full bg-white/95 p-1.5" />
-          <h1 className="text-2xl font-bold md:text-3xl">Importer le masque de saisie</h1>
-          <p className="max-w-2xl text-sm text-oms-50/90">
-            Importez le masque de saisie Excel de votre province / antenne / zone de santé. Les analyses du
-            rapport polio (nVPO2 et VPOb) seront disponibles instantanément. Réimporter remplace
-            automatiquement l&apos;ancienne version.
-          </p>
+      {/* Hero navy */}
+      <section className="overflow-hidden rounded-2xl navy-bar text-white shadow-navy">
+        <div className="grid grid-cols-1 items-center gap-4 px-6 py-8 md:grid-cols-[auto_1fr] md:gap-6">
+          <div className="flex items-center justify-center gap-3 md:justify-start">
+            <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-white/95 p-2 shadow-card">
+              <Image src="/logo/pev.png" alt="PEV" width={64} height={64} className="h-16 w-16 object-contain" />
+            </div>
+          </div>
+          <div className="text-center md:text-left">
+            <div className="mb-1 inline-block rounded-full bg-white/15 px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-accent-100">
+              Étape 1 / 2
+            </div>
+            <h1 className="text-2xl font-bold md:text-3xl">Importer le masque de saisie</h1>
+            <p className="mt-1 max-w-2xl text-sm text-accent-100/90">
+              Sélectionnez le fichier Excel de votre province / antenne / zone de santé.
+              Les analyses du rapport polio (nVPO2 et VPOb) seront disponibles instantanément.
+              Réimporter le masque remplace automatiquement l&apos;ancienne version.
+            </p>
+          </div>
         </div>
       </section>
 
@@ -91,19 +99,19 @@ export default function ImportPage() {
           const f = e.dataTransfer.files?.[0];
           if (f) void handleFile(f);
         }}
-        className={`rounded-2xl border-2 border-dashed bg-white p-8 text-center transition ${
-          dragOver ? "border-oms-500 bg-oms-50" : "border-surface-300"
+        className={`relative rounded-2xl border-2 border-dashed bg-white p-10 text-center transition shadow-card ${
+          dragOver ? "border-navy-500 bg-navy-50" : "border-navy-200"
         }`}
       >
         <input ref={inputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={onPick} />
-        <div className="mb-3 text-5xl">📄</div>
-        <p className="mb-1 text-sm text-surface-700">
+        <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-navy-50 text-3xl">📄</div>
+        <p className="mb-1 text-sm font-medium text-surface-700">
           Glissez-déposez le fichier Excel ici, ou
         </p>
         <button
           onClick={() => inputRef.current?.click()}
           disabled={busy}
-          className="mt-2 inline-flex items-center gap-2 rounded-xl bg-oms-500 px-6 py-3 text-sm font-semibold text-white shadow transition hover:bg-oms-600 disabled:opacity-50"
+          className="mt-3 inline-flex items-center gap-2 rounded-xl bg-navy-700 px-7 py-3.5 text-sm font-semibold text-white shadow-navy transition hover:bg-navy-800 disabled:opacity-50"
         >
           {busy ? (
             <>
@@ -114,7 +122,9 @@ export default function ImportPage() {
             <>📥 Choisir le masque de saisie</>
           )}
         </button>
-        <p className="mt-3 text-[11px] text-surface-400">Formats acceptés : .xlsx, .xls — feuille « Synthèse » requise</p>
+        <p className="mt-4 text-[11px] text-surface-400">
+          Formats acceptés : .xlsx, .xls — feuille « Synthèse » requise
+        </p>
       </section>
 
       {/* État courant + aperçu instantané */}
@@ -125,13 +135,13 @@ export default function ImportPage() {
               <span className="text-lg">✅</span>
               <span>
                 <strong>{data.meta.fileName}</strong> — {fmtInt(data.meta.nbAires)} aires de santé ·{" "}
-                {data.meta.province} · importé le{" "}
+                {data.meta.province} · {data.meta.nbJours} jours saisis · importé le{" "}
                 {new Date(data.meta.importedAt).toLocaleString("fr-FR")}
               </span>
             </div>
             <div className="flex items-center gap-2">
               <SyncBadge sync={sync} />
-              <Link href="/rapport" className="rounded-lg bg-oms-500 px-4 py-2 text-xs font-semibold text-white hover:bg-oms-600">
+              <Link href="/rapport" className="rounded-lg bg-navy-700 px-4 py-2 text-xs font-semibold text-white shadow hover:bg-navy-800">
                 📊 Aller au rapport
               </Link>
               <button onClick={() => { clearData(); setToast({ kind: "ok", msg: "Données effacées." }); }} className="rounded-lg border border-surface-300 px-4 py-2 text-xs font-medium text-surface-700 hover:bg-surface-100">
@@ -140,9 +150,11 @@ export default function ImportPage() {
             </div>
           </div>
 
-          <h2 className="text-sm font-bold uppercase tracking-wide text-surface-500">Aperçu instantané des analyses</h2>
+          <h2 className="text-sm font-bold uppercase tracking-wide text-surface-500">
+            Aperçu instantané des analyses
+          </h2>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <Kpi label="Complétude rapports" value={fmtPct(t.completude)} icon="📋" />
+            <Kpi label="Complétude rapports" value={fmtPct(t.completude)} icon="📋" tone={t.completude} />
             <Kpi label="Couverture nVPO2" value={fmtPct(t.nvpo2CV)} icon="💧" tone={t.nvpo2CV} />
             <Kpi label="Couverture VPOb" value={fmtPct(t.vpobCV)} icon="💧" tone={t.vpobCV} />
             <Kpi label="Récupérations PEV" value={fmtInt(t.recup)} icon="🔁" />
@@ -152,18 +164,17 @@ export default function ImportPage() {
             <Kpi label="MAPI graves" value={fmtInt(t.mapiGraves)} icon="⚕️" />
           </div>
 
-          <div className="rounded-xl border border-surface-200 bg-white p-4">
-            <h3 className="mb-2 text-sm font-semibold text-oms-800">Zones de Santé de votre import</h3>
+          <div className="rounded-xl border border-surface-200 bg-white p-4 shadow-card">
+            <h3 className="mb-3 text-sm font-semibold text-navy-700">Zones de Santé de votre import</h3>
             <div className="flex flex-wrap gap-2 text-xs">
               {data.meta.zones.map((z) => (
-                <span key={z} className="rounded-full bg-oms-50 px-3 py-1 text-oms-700">{z}</span>
+                <span key={z} className="rounded-full bg-navy-50 px-3 py-1 font-medium text-navy-700">{z}</span>
               ))}
             </div>
           </div>
         </section>
       )}
 
-      {/* Compilation nationale (toutes les entités déjà importées) */}
       <NationalPanel entities={entities} />
     </div>
   );
@@ -171,11 +182,11 @@ export default function ImportPage() {
 
 function SyncBadge({ sync }: { sync: "idle" | "syncing" | "ok" | "local" }) {
   if (sync === "syncing")
-    return <span className="rounded-lg bg-oms-50 px-3 py-2 text-xs font-medium text-oms-700">⏳ Synchronisation…</span>;
+    return <span className="rounded-lg bg-navy-50 px-3 py-2 text-xs font-medium text-navy-700">⏳ Synchronisation…</span>;
   if (sync === "ok")
     return <span className="rounded-lg bg-good-50 px-3 py-2 text-xs font-medium text-good-600">🌍 Synchronisé au niveau national</span>;
   if (sync === "local")
-    return <span className="rounded-lg bg-warn-50 px-3 py-2 text-xs font-medium text-warn-600" title="Activez le stockage Vercel KV pour la compilation nationale">💾 Enregistré localement</span>;
+    return <span className="rounded-lg bg-warn-50 px-3 py-2 text-xs font-medium text-warn-600">💾 Enregistré localement</span>;
   return null;
 }
 
@@ -191,16 +202,16 @@ function NationalPanel({ entities }: { entities: EntityInfo[] | null }) {
   }
   if (entities.length === 0) {
     return (
-      <section className="rounded-xl border border-surface-200 bg-white p-4 text-sm text-surface-500">
+      <section className="rounded-xl border border-surface-200 bg-white p-4 text-sm text-surface-500 shadow-card">
         🌍 Compilation nationale activée — aucune entité importée pour le moment.
       </section>
     );
   }
   const provinces = Array.from(new Set(entities.map((e) => e.province)));
   return (
-    <section className="rounded-2xl border border-oms-100 bg-white p-4 shadow-card">
+    <section className="rounded-2xl border border-navy-100 bg-white p-4 shadow-card">
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-sm font-bold text-oms-800">🌍 Compilation nationale — entités déjà importées</h2>
+        <h2 className="text-sm font-bold text-navy-700">🌍 Compilation nationale — entités déjà importées</h2>
         <span className="text-xs text-surface-500">{provinces.length} province(s) · {entities.length} ZS</span>
       </div>
       <div className="max-h-72 overflow-auto rounded-lg border border-surface-200">
@@ -217,7 +228,7 @@ function NationalPanel({ entities }: { entities: EntityInfo[] | null }) {
           <tbody>
             {entities.map((e, i) => (
               <tr key={`${e.province}-${e.antenne}-${e.zs}-${i}`} className="border-t border-surface-100">
-                <td className="px-3 py-1.5 font-medium text-oms-800">{e.province}</td>
+                <td className="px-3 py-1.5 font-medium text-navy-700">{e.province}</td>
                 <td className="px-3 py-1.5 text-surface-700">{e.antenne}</td>
                 <td className="px-3 py-1.5 text-surface-700">{e.zs}</td>
                 <td className="px-3 py-1.5 text-surface-700">{e.nbAires}</td>
@@ -233,14 +244,17 @@ function NationalPanel({ entities }: { entities: EntityInfo[] | null }) {
 
 function Kpi({ label, value, icon, tone }: { label: string; value: string; icon: string; tone?: number | null }) {
   const color =
-    tone == null ? "text-oms-800" : tone >= 95 ? "text-good-600" : tone >= 90 ? "text-warn-600" : "text-danger-500";
+    tone == null ? "text-navy-700" :
+    tone > 100 ? "text-accent-600" :
+    tone >= 95 ? "text-good-600" :
+    tone >= 80 ? "text-warn-600" : "text-danger-500";
   return (
     <div className="rounded-xl border border-surface-200 bg-white p-3 shadow-card">
       <div className="mb-1 flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-surface-400">
         <span>{icon}</span>
         {label}
       </div>
-      <div className={`text-xl font-bold ${color}`}>{value}</div>
+      <div className={`text-2xl font-bold ${color}`}>{value}</div>
     </div>
   );
 }

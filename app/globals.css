@@ -4,16 +4,27 @@
 
 :root {
   color-scheme: light;
+  --navy-700: #1f3864;
+  --navy-800: #162a4d;
+  --accent-500: #2563eb;
 }
 
 body {
   @apply bg-surface-50 text-surface-900 antialiased;
+  background-image:
+    radial-gradient(at 0% 0%, rgba(37, 85, 168, 0.06) 0px, transparent 50%),
+    radial-gradient(at 100% 0%, rgba(31, 56, 100, 0.04) 0px, transparent 50%);
+  background-attachment: fixed;
 }
 
+/* Effet de bandeau navy réutilisable. */
+.navy-bar {
+  background: linear-gradient(135deg, #1f3864 0%, #162a4d 100%);
+}
+
+/* Toast animation */
 @keyframes slidein {
   from { transform: translateY(-12px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
 }
-.animate-slidein {
-  animation: slidein 0.3s ease-out;
-}
+.animate-slidein { animation: slidein 0.3s ease-out; }

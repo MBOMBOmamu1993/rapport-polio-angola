@@ -3,11 +3,13 @@
  *
  * Le masque est un classeur Excel identique pour toutes les provinces / antennes /
  * zones de santé. La feuille « Synthèse » contient, par Aire de Santé, l'ensemble
- * des indicateurs déjà agrégés sur la campagne. La feuille « Donnees de base »
- * fournit l'en-tête (période, pays, province).
+ * des indicateurs déjà agrégés sur la campagne. Les feuilles « Jour1 », « Jour2 »
+ * etc. permettent de reconstituer le détail journalier (vaccinés et complétude
+ * par jour). La feuille « Donnees de base » fournit l'en-tête (période, pays).
  *
- * On ne conserve que la partie POLIO (nVPO2 et VPOb) — toute la composante
- * Rougeole-Rubéole (RR) est ignorée.
+ * Seule la composante POLIO (nVPO2 et VPOb) est conservée — la Rougeole-Rubéole
+ * (RR) est entièrement ignorée puisqu'elle ne fait pas partie de cette campagne
+ * synchronisée avec l'Angola (co-administration polio uniquement).
  */
 
 import * as XLSX from "xlsx";
@@ -40,7 +42,9 @@ const C = {
   nvpo2Urbain: 139,
   // nVPO2 — cibles (repli sur cible 0-59 si bloc dédié vide)
   nvpo2CibleDenombre: 144,
-  // nVPO2 — gestion vaccin
+  // nVPO2 — gestion vaccin (flacons reçues / utilisées / rendues / perdus)
+  nvpo2FlaconsRecus: 150,
+  nvpo2FlaconsRendus: 151,
   nvpo2Perdus: 153,
   nvpo2TauxPerte: 154,
   nvpo2FlaconsUtil: 155,
@@ -54,6 +58,8 @@ const C = {
   // VPOb — cibles
   vpobCibleDenombre: 206,
   // VPOb — gestion vaccin
+  vpobFlaconsRecus: 212,
+  vpobFlaconsRendus: 213,
   vpobPerdus: 215,
   vpobTauxPerte: 216,
   vpobFlaconsUtil: 217,
@@ -65,6 +71,15 @@ const C = {
   recup1223: 292,
   recup2459: 326,
 } as const;
+
+export interface DailyValue {
+  /** Index du jour (1-based : Jour1 = 1, Jour2 = 2, …) */
+  day: number;
+  /** Étiquette « Jour1 », « Jour2 », … */
+  label: string;
+  vaccines: number;
+  rapportsRecus: number;
+}
 
 export interface ASRecord {
   province: string;
@@ -86,21 +101,28 @@ export interface ASRecord {
   nvpo2CibleExtrap: number;
   nvpo2CibleDenombre: number;
   nvpo2ZeroDose: number;
+  nvpo2FlaconsRecus: number;
+  nvpo2FlaconsRendus: number;
   nvpo2Perdus: number;
   nvpo2FlaconsUtil: number;
   nvpo2TauxPerte: number | null;
   nvpo2Rural: number;
   nvpo2Urbain: number;
+  /** Vaccinés nVPO2 par jour de campagne (1-indexé). */
+  nvpo2Daily: DailyValue[];
   // VPOb
   vpobVacc: number;
   vpobCibleExtrap: number;
   vpobCibleDenombre: number;
   vpobZeroDose: number;
+  vpobFlaconsRecus: number;
+  vpobFlaconsRendus: number;
   vpobPerdus: number;
   vpobFlaconsUtil: number;
   vpobTauxPerte: number | null;
   vpobRural: number;
   vpobUrbain: number;
+  vpobDaily: DailyValue[];
   // récup + MAPI
   recup: number;
   mapiMineures: number;
@@ -117,6 +139,10 @@ export interface MasqueData {
     importedAt: string;
     fileName: string;
     nbAires: number;
+    /** Nombre de jours de campagne effectivement saisis dans le masque. */
+    nbJours: number;
+    /** Étiquettes des jours (« Jour1 », « Jour2 »…). */
+    jourLabels: string[];
   };
   records: ASRecord[];
 }
@@ -139,17 +165,61 @@ function cell(row: unknown[], col1: number): unknown {
 
 const TOTAL_RE = /total/i;
 
+/** Clé d'identification d'une Aire de Santé (insensible casse / accents / ponctuation). */
+function asKey(province: string, zs: string, as: string): string {
+  const norm = (s: string) =>
+    s
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, "");
+  return `${norm(province)}|${norm(zs)}|${norm(as)}`;
+}
+
 export function parseMasque(buffer: ArrayBuffer, fileName: string): MasqueData {
   const wb = XLSX.read(buffer, { type: "array" });
 
-  const synthName = wb.SheetNames.find((n) => /synth/i.test(n) && !/ps/i.test(n)) ?? "Synthèse";
+  const synthName = wb.SheetNames.find((n) => /^synth/i.test(n.trim()) && !/ps/i.test(n)) ?? "Synthèse";
   const synth = wb.Sheets[synthName];
   if (!synth) throw new Error("Feuille « Synthèse » introuvable dans le masque de saisie.");
 
   const rows = XLSX.utils.sheet_to_json<unknown[]>(synth, { header: 1, blankrows: false });
 
+  // ── 1. Extraction des feuilles « JourN » (vaccination quotidienne) ─────────
+  const jourSheets: { day: number; label: string; sheet: XLSX.WorkSheet }[] = [];
+  for (const name of wb.SheetNames) {
+    const m = /^jour\s*(\d+)$/i.exec(name.trim());
+    if (m && !/^ps/i.test(name)) {
+      jourSheets.push({ day: Number(m[1]), label: name.trim(), sheet: wb.Sheets[name] });
+    }
+  }
+  jourSheets.sort((a, b) => a.day - b.day);
+
+  // Pré-calcul : pour chaque jour, une map AS → {vacc nvpo2, vacc vpob, rapports reçus}.
+  const dailyMaps: Map<string, { nvpo2: number; vpob: number; recus: number }>[] = jourSheets.map(
+    ({ sheet }) => {
+      const m = new Map<string, { nvpo2: number; vpob: number; recus: number }>();
+      const jrows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, blankrows: false });
+      for (let i = 3; i < jrows.length; i++) {
+        const r = jrows[i];
+        if (!r) continue;
+        const province = str(cell(r, C.province));
+        const zs = str(cell(r, C.zs));
+        const as = str(cell(r, C.as));
+        if (!province || !as) continue;
+        if (TOTAL_RE.test(zs) || TOTAL_RE.test(as)) continue;
+        m.set(asKey(province, zs, as), {
+          nvpo2: num(cell(r, C.nvpo2Vacc059Total)),
+          vpob: num(cell(r, C.vpobVacc059Total)),
+          recus: num(cell(r, C.vaccRecus)),
+        });
+      }
+      return m;
+    }
+  );
+
+  // ── 2. Parcours de la feuille « Synthèse » ────────────────────────────────
   const records: ASRecord[] = [];
-  // Les 3 premières lignes sont des en-têtes ; les données commencent en ligne 4 (index 3).
   for (let i = 3; i < rows.length; i++) {
     const row = rows[i];
     if (!row) continue;
@@ -157,11 +227,25 @@ export function parseMasque(buffer: ArrayBuffer, fileName: string): MasqueData {
     const zs = str(cell(row, C.zs));
     const as = str(cell(row, C.as));
     if (!as) continue;
-    if (TOTAL_RE.test(zs) || TOTAL_RE.test(as)) continue; // lignes de sous-total
+    if (TOTAL_RE.test(zs) || TOTAL_RE.test(as)) continue;
     if (!province) continue;
 
-    const nvpo2TauxPerte = cell(row, C.nvpo2TauxPerte);
-    const vpobTauxPerte = cell(row, C.vpobTauxPerte);
+    const nvpo2TauxPerteRaw = cell(row, C.nvpo2TauxPerte);
+    const vpobTauxPerteRaw = cell(row, C.vpobTauxPerte);
+    const key = asKey(province, zs, as);
+
+    const nvpo2Daily: DailyValue[] = jourSheets.map((j, idx) => ({
+      day: j.day,
+      label: j.label,
+      vaccines: dailyMaps[idx].get(key)?.nvpo2 ?? 0,
+      rapportsRecus: dailyMaps[idx].get(key)?.recus ?? 0,
+    }));
+    const vpobDaily: DailyValue[] = jourSheets.map((j, idx) => ({
+      day: j.day,
+      label: j.label,
+      vaccines: dailyMaps[idx].get(key)?.vpob ?? 0,
+      rapportsRecus: dailyMaps[idx].get(key)?.recus ?? 0,
+    }));
 
     records.push({
       province,
@@ -182,21 +266,32 @@ export function parseMasque(buffer: ArrayBuffer, fileName: string): MasqueData {
       nvpo2CibleExtrap: num(cell(row, C.cible059)),
       nvpo2CibleDenombre: num(cell(row, C.nvpo2CibleDenombre)),
       nvpo2ZeroDose: num(cell(row, C.nvpo2ZeroDose011)) + num(cell(row, C.nvpo2ZeroDose1259)),
+      nvpo2FlaconsRecus: num(cell(row, C.nvpo2FlaconsRecus)),
+      nvpo2FlaconsRendus: num(cell(row, C.nvpo2FlaconsRendus)),
       nvpo2Perdus: num(cell(row, C.nvpo2Perdus)),
       nvpo2FlaconsUtil: num(cell(row, C.nvpo2FlaconsUtil)),
-      nvpo2TauxPerte: nvpo2TauxPerte === "" || nvpo2TauxPerte == null ? null : num(nvpo2TauxPerte),
+      nvpo2TauxPerte:
+        nvpo2TauxPerteRaw === "" || nvpo2TauxPerteRaw == null ? null : num(nvpo2TauxPerteRaw),
       nvpo2Rural: num(cell(row, C.nvpo2Rural)),
       nvpo2Urbain: num(cell(row, C.nvpo2Urbain)),
+      nvpo2Daily,
       vpobVacc: num(cell(row, C.vpobVacc059Total)),
       vpobCibleExtrap: num(cell(row, C.cible059)),
       vpobCibleDenombre: num(cell(row, C.vpobCibleDenombre)),
       vpobZeroDose: num(cell(row, C.vpobZeroDose011)) + num(cell(row, C.vpobZeroDose1259)),
+      vpobFlaconsRecus: num(cell(row, C.vpobFlaconsRecus)),
+      vpobFlaconsRendus: num(cell(row, C.vpobFlaconsRendus)),
       vpobPerdus: num(cell(row, C.vpobPerdus)),
       vpobFlaconsUtil: num(cell(row, C.vpobFlaconsUtil)),
-      vpobTauxPerte: vpobTauxPerte === "" || vpobTauxPerte == null ? null : num(vpobTauxPerte),
+      vpobTauxPerte:
+        vpobTauxPerteRaw === "" || vpobTauxPerteRaw == null ? null : num(vpobTauxPerteRaw),
       vpobRural: num(cell(row, C.vpobRural)),
       vpobUrbain: num(cell(row, C.vpobUrbain)),
-      recup: num(cell(row, C.recup011)) + num(cell(row, C.recup1223)) + num(cell(row, C.recup2459)),
+      vpobDaily,
+      recup:
+        num(cell(row, C.recup011)) +
+        num(cell(row, C.recup1223)) +
+        num(cell(row, C.recup2459)),
       mapiMineures: num(cell(row, C.mapiMineures)),
       mapiGraves: num(cell(row, C.mapiGraves)),
     });
@@ -208,15 +303,14 @@ export function parseMasque(buffer: ArrayBuffer, fileName: string): MasqueData {
     );
   }
 
-  // Méta : période depuis « Donnees de base », province majoritaire depuis les données.
+  // ── 3. Méta-données du classeur ──────────────────────────────────────────
   let periode = "";
   let pays = "RD CONGO";
-  const baseName = wb.SheetNames.find((n) => /donnees de base/i.test(n) || /données de base/i.test(n));
+  const baseName = wb.SheetNames.find((n) => /donn[eé]es de base/i.test(n));
   if (baseName) {
     const base = wb.Sheets[baseName];
     const baseRows = XLSX.utils.sheet_to_json<unknown[]>(base, { header: 1, blankrows: false });
     const r0 = baseRows[0] ?? [];
-    // « PERIODE: » en col1, valeur en col2 ; « PAYS : » col4, valeur col5.
     periode = str(cell(r0, 2));
     const paysVal = str(cell(r0, 5));
     if (paysVal) pays = paysVal;
@@ -225,6 +319,7 @@ export function parseMasque(buffer: ArrayBuffer, fileName: string): MasqueData {
   const province = mostCommon(records.map((r) => r.province));
   const antennes = unique(records.map((r) => r.antenne).filter(Boolean));
   const zones = unique(records.map((r) => r.zs).filter(Boolean));
+  const jourLabels = jourSheets.map((j) => j.label);
 
   return {
     meta: {
@@ -236,6 +331,8 @@ export function parseMasque(buffer: ArrayBuffer, fileName: string): MasqueData {
       importedAt: new Date().toISOString(),
       fileName,
       nbAires: records.length,
+      nbJours: jourSheets.length,
+      jourLabels,
     },
     records,
   };
