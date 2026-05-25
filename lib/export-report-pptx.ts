@@ -39,7 +39,7 @@ export interface CompletudeRow {
   attendus: number;
   recus: number;
   couv: number | null;
-  daily: { recus: number; couv: number | null }[];
+  daily: { recus: number; attendus: number; couv: number | null }[];
 }
 
 export interface ProblemeRow {
@@ -431,6 +431,9 @@ function buildCompletude(ctx: SlideCtx): void {
   const totalsDaily = days.map((_, i) =>
     data.completudeByUnit.reduce((a, r) => a + (r.daily[i]?.recus ?? 0), 0)
   );
+  const totalsAttendusDaily = days.map((_, i) =>
+    data.completudeByUnit.reduce((a, r) => a + (r.daily[i]?.attendus ?? 0), 0)
+  );
   const bodyRows: PptxGenJS.TableRow[] = data.completudeByUnit.map((r) => {
     const cells: PptxGenJS.TableCell[] = [
       { text: r.unit, options: tdCell({ bold: true }) },
@@ -447,7 +450,8 @@ function buildCompletude(ctx: SlideCtx): void {
     { text: "Total", options: thTotal() },
     { text: fmtInt(totalAttendus), options: thTotal({ align: "right" }) },
     ...days.flatMap((_, i): PptxGenJS.TableCell[] => {
-      const couvJour = totalAttendus > 0 ? (totalsDaily[i] / totalAttendus) * 100 : null;
+      const attJour = totalsAttendusDaily[i];
+      const couvJour = attJour > 0 ? (totalsDaily[i] / attJour) * 100 : null;
       return [
         { text: fmtInt(totalsDaily[i]), options: thTotal({ align: "right" }) },
         { text: fmtPct(couvJour, 2), options: thTotal({ align: "right" }) },

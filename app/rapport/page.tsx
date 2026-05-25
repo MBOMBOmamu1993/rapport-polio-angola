@@ -256,12 +256,13 @@ export default function RapportPage() {
 
     // Construction du tableau complétude par jour pour chaque unité.
     const completudeByUnit: CompletudeRow[] = byUnit.map((a) => {
-      // Complétude journalière = rapports reçus ce jour ÷ rapports attendus
-      // (total campagne). Le cumul des jours redonne la complétude globale et
-      // ne peut donc pas dépasser 100 % quand reçus ≤ attendus.
+      // Complétude journalière = rapports reçus ce jour ÷ rapports ATTENDUS ce jour
+      // (chaque feuille JourN porte son propre attendu), et non l'attendu total
+      // de la campagne — sinon le % est faussé (ex. 8/24 au lieu de 8/8).
       const daily = Array.from({ length: nbJours }, (_, i) => {
         const recus = a.rapportsRecusDaily[i] ?? 0;
-        return { recus, couv: a.vaccAttendus > 0 ? (recus / a.vaccAttendus) * 100 : null };
+        const attendus = a.rapportsAttendusDaily[i] ?? 0;
+        return { recus, attendus, couv: attendus > 0 ? (recus / attendus) * 100 : null };
       });
       return {
         unit: a.unit,

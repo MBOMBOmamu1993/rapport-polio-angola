@@ -117,7 +117,10 @@ export interface DailyValue {
   /** Étiquette « Jour1 », « Jour2 », … */
   label: string;
   vaccines: number;
+  /** Rapports de vaccination reçus ce jour (feuille JourN, col. « Recus »). */
   rapportsRecus: number;
+  /** Rapports de vaccination attendus ce jour (feuille JourN, col. « Attendus »). */
+  rapportsAttendus: number;
 }
 
 export interface ASRecord {
@@ -252,10 +255,13 @@ export function parseMasque(buffer: ArrayBuffer, fileName: string): MasqueData {
   }
   jourSheets.sort((a, b) => a.day - b.day);
 
-  // Pré-calcul : pour chaque jour, une map AS → {vacc nvpo2, vacc vpob, rapports reçus}.
-  const dailyMaps: Map<string, { nvpo2: number; vpob: number; recus: number }>[] = jourSheets.map(
+  // Pré-calcul : pour chaque jour, une map AS → {vacc nvpo2, vacc vpob, rapports
+  // attendus et reçus DU JOUR}. Les feuilles JourN ont la même structure de
+  // colonnes que la Synthèse : col. 90 = Attendus du jour, col. 91 = Reçus du jour.
+  type DailyCell = { nvpo2: number; vpob: number; recus: number; attendus: number };
+  const dailyMaps: Map<string, DailyCell>[] = jourSheets.map(
     ({ sheet }) => {
-      const m = new Map<string, { nvpo2: number; vpob: number; recus: number }>();
+      const m = new Map<string, DailyCell>();
       const jrows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, blankrows: false });
       for (let i = 3; i < jrows.length; i++) {
         const r = jrows[i];
@@ -269,6 +275,7 @@ export function parseMasque(buffer: ArrayBuffer, fileName: string): MasqueData {
           nvpo2: num(cell(r, C.nvpo2Vacc059Total)),
           vpob: num(cell(r, C.vpobVacc059Total)),
           recus: num(cell(r, C.vaccRecus)),
+          attendus: num(cell(r, C.vaccAttendus)),
         });
       }
       return m;
@@ -296,12 +303,14 @@ export function parseMasque(buffer: ArrayBuffer, fileName: string): MasqueData {
       label: j.label,
       vaccines: dailyMaps[idx].get(key)?.nvpo2 ?? 0,
       rapportsRecus: dailyMaps[idx].get(key)?.recus ?? 0,
+      rapportsAttendus: dailyMaps[idx].get(key)?.attendus ?? 0,
     }));
     const vpobDaily: DailyValue[] = jourSheets.map((j, idx) => ({
       day: j.day,
       label: j.label,
       vaccines: dailyMaps[idx].get(key)?.vpob ?? 0,
       rapportsRecus: dailyMaps[idx].get(key)?.recus ?? 0,
+      rapportsAttendus: dailyMaps[idx].get(key)?.attendus ?? 0,
     }));
 
     records.push({
