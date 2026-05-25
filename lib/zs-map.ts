@@ -30,10 +30,10 @@ export function normalizeZS(name: string): string {
 
 function colorForCompletude(v: number | undefined): string {
   if (v == null || !Number.isFinite(v)) return NO_DATA;
-  if (v >= 100) return "#0093D5";
-  if (v >= 90) return "#66BEE7";
-  if (v >= 80) return "#F29E0B";
-  return "#E23636";
+  if (v > 100) return "#1D4ED8"; // > 100 % — bleu
+  if (v >= 95) return "#22B457"; // 95–100 % — vert
+  if (v >= 80) return "#F1C40F"; // 80–95 % — jaune
+  return "#E23636";              // < 80 % — rouge
 }
 
 /** Détecte la propriété portant le nom de la ZS dans les features du TopoJSON. */

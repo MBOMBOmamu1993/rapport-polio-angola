@@ -251,10 +251,11 @@ export default function RapportPage() {
         <h2 className="mb-4 text-sm font-bold text-navy-700">📊 Contenu du rapport PowerPoint</h2>
         <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
           {[
-            "Page de garde (image polio + logos)",
+            "Page de garde (image polio + logo PEV)",
             "Plan de présentation",
             "Points saillants",
             "Complétude des rapports par ZS (jauge + tableau J1..Jn)",
+            "Spatialisation de la complétude (carte RDC des Zones de Santé)",
             "Couvertures vaccinales nVPO2 par jour (cible / vaccinés / couverture)",
             "Couvertures vaccinales VPOb par jour",
             "Récupération PEV de routine (co-administration)",

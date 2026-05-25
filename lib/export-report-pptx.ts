@@ -93,9 +93,9 @@ export interface ReportData {
 
 /* ─── Design tokens (navy / Power BI) ──────────────────────────────────── */
 
-const NAVY = "1F3864";      // bandeau principal
-const NAVY_DEEP = "162A4D"; // bandeau secondaire
-const NAVY_DARKER = "0A1733";
+const NAVY = "002A72";      // bandeau principal (bleu OMS)
+const NAVY_DEEP = "001B4D"; // bandeau secondaire
+const NAVY_DARKER = "00112F";
 const ACCENT = "2563EB";    // bleu vif (CTA)
 const ACCENT_LIGHT = "DBEAFE";
 const GREY = "64748B";
@@ -169,18 +169,18 @@ export async function exportReportPPT(data: ReportData): Promise<void> {
   pptx.company = "Programme Élargi de Vaccination";
   pptx.title = `Rapport polio – ${data.province}`;
 
-  const [cover, pev, oms] = await Promise.all([
+  const [cover, pev] = await Promise.all([
     toDataUrl("/cover-polio.png"),
-    toDataUrl("/logo/pev.png"),
-    toDataUrl("/logo/oms.png"),
+    toDataUrl("/logo/pev-transparent.png"),
   ]);
 
-  const ctx: SlideCtx = { pptx, data, pev, oms, addHeader: addHeaderFactory(pptx, data, pev, oms) };
+  const ctx: SlideCtx = { pptx, data, pev, addHeader: addHeaderFactory(pptx, data, pev) };
 
   buildCover(ctx, cover);
   buildPlan(ctx);
   buildPointsSaillants(ctx);
   buildCompletude(ctx);
+  buildCompletudeMap(ctx);
   buildCoverage(ctx, "nVPO2", data.nvpo2Daily, data.saillants.nvpo2CV);
   buildCoverage(ctx, "VPOb", data.vpobDaily, data.saillants.vpobCV);
   buildRecup(ctx);
@@ -199,15 +199,13 @@ interface SlideCtx {
   pptx: PptxGenJS;
   data: ReportData;
   pev: string | null;
-  oms: string | null;
   addHeader: (s: PptxGenJS.Slide, title: string, subtitle?: string) => void;
 }
 
 function addHeaderFactory(
   pptx: PptxGenJS,
   data: ReportData,
-  pev: string | null,
-  oms: string | null
+  pev: string | null
 ): (s: PptxGenJS.Slide, title: string, subtitle?: string) => void {
   return (s, title, subtitle) => {
     s.background = { color: "FFFFFF" };
@@ -225,8 +223,7 @@ function addHeaderFactory(
         fontSize: 11, color: "CCE4FF", align: "left", italic: true, fontFace: "Calibri",
       });
     }
-    if (pev) s.addImage({ data: pev, x: W - 1.55, y: 0.13, w: 0.7, h: 0.7 });
-    if (oms) s.addImage({ data: oms, x: W - 0.8, y: 0.18, w: 0.62, h: 0.62 });
+    if (pev) s.addImage({ data: pev, x: W - 1.05, y: 0.13, w: 0.7, h: 0.7 });
 
     // Pied de page.
     s.addText("Campagne de vaccination polio synchronisée avec l'Angola — nVPO2 & VPOb (co-administration)", {
@@ -241,7 +238,7 @@ function addHeaderFactory(
 /* ─── Slide 1 : Page de garde ──────────────────────────────────────────── */
 
 function buildCover(ctx: SlideCtx, cover: string | null): void {
-  const { pptx, data, pev, oms } = ctx;
+  const { pptx, data, pev } = ctx;
   const s = pptx.addSlide();
   s.background = { color: NAVY_DARKER };
   if (cover) {
@@ -253,9 +250,8 @@ function buildCover(ctx: SlideCtx, cover: string | null): void {
   s.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: W * 0.46, h: H, fill: { color: NAVY_DEEP } });
   s.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 0.16, h: H, fill: { color: ACCENT } });
 
-  // Logos.
-  if (pev) s.addImage({ data: pev, x: 0.6, y: 0.5, w: 1.0, h: 1.0 });
-  if (oms) s.addImage({ data: oms, x: 1.85, y: 0.62, w: 0.78, h: 0.78 });
+  // Logo PEV (sans fond).
+  if (pev) s.addImage({ data: pev, x: 0.6, y: 0.5, w: 1.2, h: 1.2 });
 
   // Eyebrow.
   s.addText("RAPPORT DES RÉSULTATS", {
@@ -448,8 +444,32 @@ function buildCompletude(ctx: SlideCtx): void {
     rowH: 0.28, valign: "middle", fontFace: "Calibri",
   });
 
-  // Carte choroplèthe optionnelle — affichée sur une slide dédiée si fournie.
-  // (Le rendu est volontairement géré ailleurs pour éviter de chevaucher la jauge.)
+}
+
+/* ─── Slide 4 bis : Spatialisation de la complétude (carte RDC / ZS) ────── */
+
+function buildCompletudeMap(ctx: SlideCtx): void {
+  const { pptx, data } = ctx;
+  const s = pptx.addSlide();
+  ctx.addHeader(s, "Spatialisation de la complétude globale", "Carte des Zones de Santé de la RDC — Source : Synthèse du masque de saisie");
+  addLegend(pptx, s, 0.5, 1.15);
+
+  const png = data.completudeMapPng;
+  if (png) {
+    // Fond cartographique RDC (1100×1000 ≈ ratio 1.1).
+    const h = 5.45;
+    const w = h * 1.1;
+    s.addImage({ data: png, x: (W - w) / 2, y: 1.7, w, h });
+  } else {
+    s.addShape(pptx.ShapeType.roundRect, {
+      x: 2.0, y: 2.8, w: W - 4.0, h: 1.8,
+      fill: { color: SOFT }, line: { color: "DEE5EE", width: 1 }, rectRadius: 0.1,
+    });
+    s.addText(
+      "Carte indisponible — le fond cartographique des Zones de Santé n'a pas pu être chargé au moment de la génération (une connexion Internet est requise).",
+      { x: 2.3, y: 2.8, w: W - 4.6, h: 1.8, align: "center", valign: "middle", fontSize: 13, italic: true, color: GREY }
+    );
+  }
 }
 
 function addLegend(pptx: PptxGenJS, s: PptxGenJS.Slide, x: number, y: number): void {
