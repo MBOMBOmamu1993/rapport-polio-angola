@@ -15,15 +15,22 @@ export function Nav() {
   return (
     <header className="sticky top-0 z-30 navy-bar shadow-navy">
       <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3 md:px-6">
-        <div className="flex h-12 w-12 items-center justify-center">
-          <Image src="/logo/pev-transparent.png" alt="PEV" width={48} height={48} className="h-12 w-12 object-contain" priority />
+        <div className="flex shrink-0 items-center rounded-lg bg-white px-2.5 py-1.5 shadow-sm">
+          <Image
+            src="/logo/pev-officiel.png"
+            alt="PEV — Programme Élargi de Vaccination — RD Congo"
+            width={326}
+            height={50}
+            className="h-7 w-auto md:h-8"
+            priority
+          />
         </div>
         <div className="mr-auto leading-tight">
           <div className="text-sm font-bold text-white md:text-base">
             Campagne polio synchronisée avec l&apos;Angola
           </div>
           <div className="text-[11px] text-accent-100/80 md:text-xs">
-            Programme Élargi de Vaccination — RD Congo · nVPO2 &amp; VPOb
+            nVPO2 &amp; VPOb (co-administration)
           </div>
         </div>
         <nav className="flex gap-1.5">
