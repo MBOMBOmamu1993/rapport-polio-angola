@@ -119,7 +119,6 @@ const THR_MID = "F1C40F";
 const THR_HIGH = "22B457";
 const THR_FULL = "1D4ED8";
 const THR_NONE = "CBD5E1";
-const HILITE = "F4E03A"; // jaune de localisation (zone couverte)
 
 const W = 13.333;
 const H = 7.5;
@@ -395,50 +394,29 @@ function buildPointsSaillants(ctx: SlideCtx): void {
 
 function buildCompletude(ctx: SlideCtx): void {
   const { pptx, data } = ctx;
-  const s = pptx.addSlide();
-  ctx.addHeader(s, "Complétude des rapports journaliers et globale", "Source : Synthèse du masque de saisie");
-
   const sa = data.saillants;
   const globalCV = sa.completude;
-
-  // ── Légende des seuils en haut.
-  addLegend(pptx, s, 0.5, 1.2);
-
-  // ── Bloc gauche : KPI principal + carte d'identité de la complétude.
   const arcColor = thresholdColor(globalCV);
-  s.addShape(pptx.ShapeType.roundRect, { x: 0.5, y: 1.95, w: 6.2, h: 4.0, fill: { color: SOFT }, line: { color: "DEE5EE", width: 1 }, rectRadius: 0.08 });
-  s.addText("Complétude globale", { x: 0.7, y: 2.0, w: 5.8, h: 0.45, fontSize: 18, bold: true, color: NAVY });
-
-  // KPI géant — cercle plein avec valeur centrée + libellé.
-  s.addShape(pptx.ShapeType.ellipse, { x: 0.95, y: 2.6, w: 2.4, h: 2.4, fill: { color: arcColor }, line: { color: arcColor, width: 0 } });
-  s.addShape(pptx.ShapeType.ellipse, { x: 1.15, y: 2.8, w: 2.0, h: 2.0, fill: { color: "FFFFFF" }, line: { color: "FFFFFF", width: 0 } });
-  s.addText(fmtPct(globalCV), {
-    x: 0.95, y: 3.4, w: 2.4, h: 0.7,
-    align: "center", valign: "middle", fontSize: 30, bold: true, color: arcColor,
-  });
-  s.addText("complétude\nrapports", {
-    x: 0.95, y: 4.05, w: 2.4, h: 0.5,
-    align: "center", valign: "top", fontSize: 13, color: GREY,
-  });
-
-  // KPIs à droite (rapports reçus / attendus).
-  s.addShape(pptx.ShapeType.roundRect, { x: 3.55, y: 2.85, w: 3.05, h: 1.0, fill: { color: "FFFFFF" }, line: { color: "DEE5EE", width: 1 }, rectRadius: 0.06 });
-  s.addText("Rapports reçus", { x: 3.7, y: 2.9, w: 2.8, h: 0.35, fontSize: 13, color: GREY });
-  s.addText(fmtInt(sa.completudeRecus), { x: 3.7, y: 3.22, w: 2.8, h: 0.6, fontSize: 26, bold: true, color: NAVY_DEEP });
-
-  s.addShape(pptx.ShapeType.roundRect, { x: 3.55, y: 3.95, w: 3.05, h: 1.0, fill: { color: "FFFFFF" }, line: { color: "DEE5EE", width: 1 }, rectRadius: 0.06 });
-  s.addText("Rapports attendus", { x: 3.7, y: 4.0, w: 2.8, h: 0.35, fontSize: 13, color: GREY });
-  s.addText(fmtInt(sa.completudeAttendus), { x: 3.7, y: 4.32, w: 2.8, h: 0.6, fontSize: 26, bold: true, color: NAVY_DEEP });
-
-  s.addText("Une bonne complétude (≥ 95 %) conditionne la fiabilité des couvertures vaccinales calculées.", {
-    x: 0.7, y: 5.1, w: 5.8, h: 0.75, fontSize: 13, color: GREY, italic: true,
-  });
-
-  // ── Bloc droit : tableau jour-par-jour (par unité d'agrégation).
-  s.addShape(pptx.ShapeType.roundRect, { x: 6.9, y: 1.95, w: W - 7.4, h: 4.0, fill: { color: "FFFFFF" }, line: { color: "DEE5EE", width: 1 }, rectRadius: 0.08 });
-  s.addText(`Complétude par ${data.byUnitLabel}`, { x: 7.05, y: 2.0, w: 5.5, h: 0.45, fontSize: 18, bold: true, color: NAVY });
-
   const days = data.jourLabels;
+
+  const drawKpi = (s: PptxGenJS.Slide) => {
+    s.addShape(pptx.ShapeType.roundRect, { x: 0.5, y: 1.95, w: 6.2, h: 4.0, fill: { color: SOFT }, line: { color: "DEE5EE", width: 1 }, rectRadius: 0.08 });
+    s.addText("Complétude globale", { x: 0.7, y: 2.0, w: 5.8, h: 0.45, fontSize: 18, bold: true, color: NAVY });
+    s.addShape(pptx.ShapeType.ellipse, { x: 0.95, y: 2.6, w: 2.4, h: 2.4, fill: { color: arcColor }, line: { color: arcColor, width: 0 } });
+    s.addShape(pptx.ShapeType.ellipse, { x: 1.15, y: 2.8, w: 2.0, h: 2.0, fill: { color: "FFFFFF" }, line: { color: "FFFFFF", width: 0 } });
+    s.addText(fmtPct(globalCV), { x: 0.95, y: 3.4, w: 2.4, h: 0.7, align: "center", valign: "middle", fontSize: 30, bold: true, color: arcColor });
+    s.addText("complétude\nrapports", { x: 0.95, y: 4.05, w: 2.4, h: 0.5, align: "center", valign: "top", fontSize: 13, color: GREY });
+    s.addShape(pptx.ShapeType.roundRect, { x: 3.55, y: 2.85, w: 3.05, h: 1.0, fill: { color: "FFFFFF" }, line: { color: "DEE5EE", width: 1 }, rectRadius: 0.06 });
+    s.addText("Rapports reçus", { x: 3.7, y: 2.9, w: 2.8, h: 0.35, fontSize: 13, color: GREY });
+    s.addText(fmtInt(sa.completudeRecus), { x: 3.7, y: 3.22, w: 2.8, h: 0.6, fontSize: 26, bold: true, color: NAVY_DEEP });
+    s.addShape(pptx.ShapeType.roundRect, { x: 3.55, y: 3.95, w: 3.05, h: 1.0, fill: { color: "FFFFFF" }, line: { color: "DEE5EE", width: 1 }, rectRadius: 0.06 });
+    s.addText("Rapports attendus", { x: 3.7, y: 4.0, w: 2.8, h: 0.35, fontSize: 13, color: GREY });
+    s.addText(fmtInt(sa.completudeAttendus), { x: 3.7, y: 4.32, w: 2.8, h: 0.6, fontSize: 26, bold: true, color: NAVY_DEEP });
+    s.addText("Une bonne complétude (≥ 95 %) conditionne la fiabilité des couvertures vaccinales calculées.", {
+      x: 0.7, y: 5.1, w: 5.8, h: 0.75, fontSize: 13, color: GREY, italic: true,
+    });
+  };
+
   const head: PptxGenJS.TableCell[] = [
     { text: data.byUnitLabel, options: thHeader() },
     { text: "Attendus", options: thHeader() },
@@ -453,40 +431,67 @@ function buildCompletude(ctx: SlideCtx): void {
   const totalsDaily = days.map((_, i) =>
     data.completudeByUnit.reduce((a, r) => a + (r.daily[i]?.recus ?? 0), 0)
   );
-  const trows: PptxGenJS.TableRow[] = [
-    head,
-    ...data.completudeByUnit.map((r) => {
-      const cells: PptxGenJS.TableCell[] = [
-        { text: r.unit, options: tdCell({ bold: true }) },
-        { text: fmtInt(r.attendus), options: tdCell({ align: "right" }) },
-      ];
-      r.daily.forEach((d) => {
-        cells.push({ text: fmtInt(d.recus), options: tdCell({ align: "right" }) });
-        cells.push({ text: fmtPct(d.couv, 2), options: tdCell({ align: "right", bold: true, fill: { color: thresholdColor(d.couv) }, color: "FFFFFF" }) });
-      });
-      cells.push({ text: fmtPct(r.couv, 2), options: tdCell({ align: "right", bold: true, fill: { color: thresholdColor(r.couv) }, color: "FFFFFF" }) });
-      return cells;
-    }),
-    [
-      { text: "Total", options: thTotal() },
-      { text: fmtInt(totalAttendus), options: thTotal({ align: "right" }) },
-      ...days.flatMap((_, i): PptxGenJS.TableCell[] => {
-        const couvJour = totalAttendus > 0 ? (totalsDaily[i] / totalAttendus) * 100 : null;
-        return [
-          { text: fmtInt(totalsDaily[i]), options: thTotal({ align: "right" }) },
-          { text: fmtPct(couvJour, 2), options: thTotal({ align: "right" }) },
-        ];
-      }),
-      { text: fmtPct(totalAttendus > 0 ? (totalRecus / totalAttendus) * 100 : null, 2), options: thTotal({ align: "right" }) },
-    ],
-  ];
-  const colW = computeColW(W - 7.6, 2 + days.length * 2 + 1, [1.4, 0.9, ...days.flatMap(() => [0.8, 0.8]), 0.9]);
-  s.addTable(trows, {
-    x: 7.0, y: 2.55, w: W - 7.4, colW,
-    border: { type: "solid", color: "DEE5EE", pt: 0.5 },
-    rowH: 0.34, valign: "middle", fontFace: "Calibri",
+  const bodyRows: PptxGenJS.TableRow[] = data.completudeByUnit.map((r) => {
+    const cells: PptxGenJS.TableCell[] = [
+      { text: r.unit, options: tdCell({ bold: true }) },
+      { text: fmtInt(r.attendus), options: tdCell({ align: "right" }) },
+    ];
+    r.daily.forEach((d) => {
+      cells.push({ text: fmtInt(d.recus), options: tdCell({ align: "right" }) });
+      cells.push({ text: fmtPct(d.couv, 2), options: tdCell({ align: "right", bold: true, fill: { color: thresholdColor(d.couv) }, color: "FFFFFF" }) });
+    });
+    cells.push({ text: fmtPct(r.couv, 2), options: tdCell({ align: "right", bold: true, fill: { color: thresholdColor(r.couv) }, color: "FFFFFF" }) });
+    return cells;
   });
+  const totalRow: PptxGenJS.TableRow = [
+    { text: "Total", options: thTotal() },
+    { text: fmtInt(totalAttendus), options: thTotal({ align: "right" }) },
+    ...days.flatMap((_, i): PptxGenJS.TableCell[] => {
+      const couvJour = totalAttendus > 0 ? (totalsDaily[i] / totalAttendus) * 100 : null;
+      return [
+        { text: fmtInt(totalsDaily[i]), options: thTotal({ align: "right" }) },
+        { text: fmtPct(couvJour, 2), options: thTotal({ align: "right" }) },
+      ];
+    }),
+    { text: fmtPct(totalAttendus > 0 ? (totalRecus / totalAttendus) * 100 : null, 2), options: thTotal({ align: "right" }) },
+  ];
 
+  const nCols = 2 + days.length * 2 + 1;
+  const weights = [1.4, 0.9, ...days.flatMap(() => [0.8, 0.8]), 0.9];
+  const colWNarrow = computeColW(W - 7.4, nCols, weights);
+  const colWWide = computeColW(W - 0.9, nCols, weights);
+
+  const allRows = [...bodyRows, totalRow];
+  const rowH = 0.34;
+  // 1ère diapo : table à droite (colonne étroite) à côté du KPI ; suivantes : pleine largeur.
+  const perPageFirst = rowsPerPage(2.55, 5.9, 0.6, rowH);
+  const perPageNext = rowsPerPage(1.45, 6.4, 0.6, rowH);
+  const pages: PptxGenJS.TableRow[][] = [];
+  pages.push(allRows.slice(0, perPageFirst));
+  for (let i = perPageFirst; i < allRows.length; i += perPageNext) pages.push(allRows.slice(i, i + perPageNext));
+
+  pages.forEach((pageRows, idx) => {
+    const s = pptx.addSlide();
+    ctx.addHeader(s, `Complétude des rapports journaliers et globale${suiteSuffix(idx, pages.length)}`, "Source : Synthèse du masque de saisie");
+    addLegend(pptx, s, 0.5, 1.2);
+    if (idx === 0) {
+      drawKpi(s);
+      s.addShape(pptx.ShapeType.roundRect, { x: 6.9, y: 1.95, w: W - 7.4, h: 4.0, fill: { color: "FFFFFF" }, line: { color: "DEE5EE", width: 1 }, rectRadius: 0.08 });
+      s.addText(`Complétude par ${data.byUnitLabel}`, { x: 7.05, y: 2.0, w: 5.5, h: 0.45, fontSize: 18, bold: true, color: NAVY });
+      s.addTable([head, ...pageRows], {
+        x: 7.0, y: 2.55, w: W - 7.4, colW: colWNarrow,
+        border: { type: "solid", color: "DEE5EE", pt: 0.5 },
+        rowH, valign: "middle", fontFace: "Calibri",
+      });
+    } else {
+      s.addText(`Complétude par ${data.byUnitLabel}`, { x: 0.5, y: 1.62, w: 8, h: 0.4, fontSize: 16, bold: true, color: NAVY });
+      s.addTable([head, ...pageRows], {
+        x: 0.45, y: 2.0, w: W - 0.9, colW: colWWide,
+        border: { type: "solid", color: "DEE5EE", pt: 0.5 },
+        rowH, valign: "middle", fontFace: "Calibri",
+      });
+    }
+  });
 }
 
 /* ─── Slide 4 bis : Spatialisation de la complétude (carte RDC / ZS) ────── */
@@ -494,13 +499,22 @@ function buildCompletude(ctx: SlideCtx): void {
 function buildCompletudeMap(ctx: SlideCtx): void {
   const { pptx, data } = ctx;
   const s = pptx.addSlide();
-  ctx.addHeader(s, "Localisation de la zone de la campagne", "Carte de la RD Congo — zones de santé couvertes surlignées");
+  ctx.addHeader(s, "Spatialisation de la complétude", "Carte de la RD Congo — Zones de Santé du périmètre colorées selon leur complétude");
 
-  // Légende : zone couverte / autres ZS.
-  s.addShape(pptx.ShapeType.rect, { x: 0.55, y: 1.28, w: 0.45, h: 0.3, fill: { color: HILITE } });
-  s.addText(`Zone(s) de la campagne (${data.scopeLabel})`, { x: 1.08, y: 1.24, w: 7.5, h: 0.38, fontSize: 14, color: NAVY, valign: "middle", bold: true });
-  s.addShape(pptx.ShapeType.rect, { x: 0.55, y: 1.68, w: 0.45, h: 0.3, fill: { color: "E2E8F0" }, line: { color: "94A3B8", width: 0.75 } });
-  s.addText("Reste du territoire national", { x: 1.08, y: 1.64, w: 6.0, h: 0.38, fontSize: 14, color: GREY, valign: "middle" });
+  // Légende des seuils de complétude.
+  s.addText("Complétude :", { x: 0.55, y: 1.24, w: 1.7, h: 0.38, fontSize: 14, color: NAVY, bold: true, valign: "middle" });
+  const leg: { c: string; t: string }[] = [
+    { c: THR_LOW, t: "< 60 %" },
+    { c: THR_MID, t: "60 – 79,9 %" },
+    { c: THR_HIGH, t: "≥ 80 %" },
+  ];
+  leg.forEach((it, i) => {
+    const cx = 2.3 + i * 2.1;
+    s.addShape(pptx.ShapeType.rect, { x: cx, y: 1.28, w: 0.42, h: 0.3, fill: { color: it.c } });
+    s.addText(it.t, { x: cx + 0.47, y: 1.24, w: 1.5, h: 0.38, fontSize: 13, color: NAVY, valign: "middle" });
+  });
+  s.addShape(pptx.ShapeType.rect, { x: 0.55, y: 1.68, w: 0.42, h: 0.3, fill: { color: "F1F5F9" }, line: { color: "94A3B8", width: 0.75 } });
+  s.addText("Hors périmètre", { x: 1.05, y: 1.64, w: 3.0, h: 0.38, fontSize: 13, color: GREY, valign: "middle" });
 
   const png = data.scopeMapPng;
   if (png) {
@@ -546,10 +560,6 @@ function buildCoverage(
   globalCV: number | null
 ): void {
   const { pptx, data } = ctx;
-  const s = pptx.addSlide();
-  ctx.addHeader(s, `Couvertures vaccinales ${vaccine}, par ${data.byUnitLabel}`, "Source : Synthèse du masque de saisie");
-  addLegend(pptx, s, 0.5, 1.15);
-
   const days = data.jourLabels;
   // En-tête du tableau, identique au modèle :
   // ZS | Cible Campagne | Cible Polio Journalière | Vacc. J1 | Couvert. J1 | … | Couvert. Globale
@@ -571,61 +581,67 @@ function buildCoverage(
   const totalVacc = rows.reduce((a, r) => a + r.totalVacc, 0);
   const totalCouv = totalCible > 0 ? (totalVacc / totalCible) * 100 : null;
 
-  const trows: PptxGenJS.TableRow[] = [
-    head,
-    ...rows.map((r): PptxGenJS.TableCell[] => {
-      const cells: PptxGenJS.TableCell[] = [
-        { text: r.unit, options: tdCell({ bold: true }) },
-        { text: fmtInt(r.cibleCampagne), options: tdCell({ align: "right" }) },
-        { text: fmtInt(r.cibleJournaliere), options: tdCell({ align: "right" }) },
+  const bodyRows: PptxGenJS.TableRow[] = rows.map((r): PptxGenJS.TableCell[] => {
+    const cells: PptxGenJS.TableCell[] = [
+      { text: r.unit, options: tdCell({ bold: true }) },
+      { text: fmtInt(r.cibleCampagne), options: tdCell({ align: "right" }) },
+      { text: fmtInt(r.cibleJournaliere), options: tdCell({ align: "right" }) },
+    ];
+    r.daily.forEach((d) => {
+      cells.push({ text: fmtInt(d.vaccines), options: tdCell({ align: "right" }) });
+      cells.push({ text: fmtPct(d.couvJour, 2), options: tdCell({ align: "right", bold: true, fill: { color: thresholdColor(d.couvJour) }, color: "FFFFFF" }) });
+    });
+    cells.push({ text: fmtPct(r.couvGlobale, 2), options: tdCell({ align: "right", bold: true, fill: { color: thresholdColor(r.couvGlobale) }, color: "FFFFFF" }) });
+    return cells;
+  });
+  const totalRow: PptxGenJS.TableRow = [
+    { text: "Total", options: thTotal() },
+    { text: fmtInt(totalCible), options: thTotal({ align: "right" }) },
+    { text: fmtInt(totalCibleJ), options: thTotal({ align: "right" }) },
+    ...days.flatMap((_, i): PptxGenJS.TableCell[] => {
+      const couvJ = totalCible > 0 ? (totalsDaily[i] / totalCible) * 100 : null;
+      return [
+        { text: fmtInt(totalsDaily[i]), options: thTotal({ align: "right" }) },
+        { text: fmtPct(couvJ, 2), options: thTotal({ align: "right" }) },
       ];
-      r.daily.forEach((d) => {
-        cells.push({ text: fmtInt(d.vaccines), options: tdCell({ align: "right" }) });
-        cells.push({ text: fmtPct(d.couvJour, 2), options: tdCell({ align: "right", bold: true, fill: { color: thresholdColor(d.couvJour) }, color: "FFFFFF" }) });
-      });
-      cells.push({ text: fmtPct(r.couvGlobale, 2), options: tdCell({ align: "right", bold: true, fill: { color: thresholdColor(r.couvGlobale) }, color: "FFFFFF" }) });
-      return cells;
     }),
-    [
-      { text: "Total", options: thTotal() },
-      { text: fmtInt(totalCible), options: thTotal({ align: "right" }) },
-      { text: fmtInt(totalCibleJ), options: thTotal({ align: "right" }) },
-      ...days.flatMap((_, i): PptxGenJS.TableCell[] => {
-        const couvJ = totalCible > 0 ? (totalsDaily[i] / totalCible) * 100 : null;
-        return [
-          { text: fmtInt(totalsDaily[i]), options: thTotal({ align: "right" }) },
-          { text: fmtPct(couvJ, 2), options: thTotal({ align: "right" }) },
-        ];
-      }),
-      { text: fmtPct(totalCouv, 2), options: thTotal({ align: "right" }) },
-    ],
+    { text: fmtPct(totalCouv, 2), options: thTotal({ align: "right" }) },
   ];
 
   const nCols = 3 + days.length * 2 + 1;
   const weights = [1.6, 0.85, 0.95, ...days.flatMap(() => [0.85, 0.8]), 0.95];
   const colW = computeColW(W - 1.1, nCols, weights);
-  s.addTable(trows, {
-    x: 0.55, y: 1.65, w: W - 1.1, colW,
-    border: { type: "solid", color: "DEE5EE", pt: 0.5 },
-    rowH: 0.36, valign: "middle", fontFace: "Calibri",
-  });
 
-  addCommentBar(pptx, s, coverageComment(rows, globalCV, vaccine));
+  const tableY = 1.65;
+  const rowH = 0.36;
+  const perPage = rowsPerPage(tableY, 5.9, 0.62, rowH);
+  const pages = chunkRows([...bodyRows, totalRow], perPage);
+  pages.forEach((pageRows, idx) => {
+    const s = pptx.addSlide();
+    ctx.addHeader(s, `Couvertures vaccinales ${vaccine}, par ${data.byUnitLabel}${suiteSuffix(idx, pages.length)}`, "Source : Synthèse du masque de saisie");
+    addLegend(pptx, s, 0.5, 1.15);
+    s.addTable([head, ...pageRows], {
+      x: 0.55, y: tableY, w: W - 1.1, colW,
+      border: { type: "solid", color: "DEE5EE", pt: 0.5 },
+      rowH, valign: "middle", fontFace: "Calibri",
+    });
+    addCommentBar(pptx, s, coverageComment(rows, globalCV, vaccine));
+  });
 }
 
 /* ─── Slide 7 : Récupération PEV de routine ────────────────────────────── */
 
 function buildRecup(ctx: SlideCtx): void {
   const { pptx, data } = ctx;
-  const s = pptx.addSlide();
-  ctx.addHeader(s, "Récupération des enfants en PEV de routine", "Enfants vaccinés (EV) par antigène pendant la campagne — toutes tranches d'âge");
-
   const ant = data.antigenLabels;
   const rows = data.recupAntigenByUnit;
   const totals = data.recupAntigenTotals;
   const hasData = totals.some((v) => v > 0);
+  const totalEnfants = totals.reduce((a, b) => a + b, 0);
 
   if (ant.length === 0 || !hasData) {
+    const s = pptx.addSlide();
+    ctx.addHeader(s, "Récupération des enfants en PEV de routine", "Enfants vaccinés (EV) par antigène pendant la campagne — toutes tranches d'âge");
     s.addText("Aucune récupération PEV par antigène saisie pour ce périmètre.", {
       x: 1, y: 3.2, w: W - 2, h: 1, align: "center", fontSize: 16, italic: true, color: GREY,
     });
@@ -633,34 +649,37 @@ function buildRecup(ctx: SlideCtx): void {
     return;
   }
 
-  // Tableau matriciel : unité (ZS) × antigène (EV).
   const head: PptxGenJS.TableCell[] = [
     { text: data.byUnitLabel, options: thHeader() },
     ...ant.map((a): PptxGenJS.TableCell => ({ text: a, options: thHeader() })),
   ];
-  const trows: PptxGenJS.TableRow[] = [
-    head,
-    ...rows.map((r): PptxGenJS.TableCell[] => [
-      { text: r.unit, options: tdCell({ bold: true }) },
-      ...r.ev.map((v): PptxGenJS.TableCell => ({ text: fmtInt(v), options: tdCell({ align: "right" }) })),
-    ]),
-    [
-      { text: "Total", options: thTotal() },
-      ...totals.map((v): PptxGenJS.TableCell => ({ text: fmtInt(v), options: thTotal({ align: "right" }) })),
-    ],
+  const bodyRows: PptxGenJS.TableRow[] = rows.map((r): PptxGenJS.TableCell[] => [
+    { text: r.unit, options: tdCell({ bold: true }) },
+    ...r.ev.map((v): PptxGenJS.TableCell => ({ text: fmtInt(v), options: tdCell({ align: "right" }) })),
+  ]);
+  const totalRow: PptxGenJS.TableRow = [
+    { text: "Total", options: thTotal() },
+    ...totals.map((v): PptxGenJS.TableCell => ({ text: fmtInt(v), options: thTotal({ align: "right" }) })),
   ];
 
   const nCols = 1 + ant.length;
   const colW = computeColW(W - 0.9, nCols, [1.7, ...ant.map(() => 0.75)]);
-  s.addTable(trows, {
-    x: 0.45, y: 1.4, w: W - 0.9, colW,
-    border: { type: "solid", color: "DEE5EE", pt: 0.5 },
-    rowH: 0.34, valign: "middle", fontFace: "Calibri", fontSize: 10,
-    autoPage: false,
-  });
 
-  const totalEnfants = totals.reduce((a, b) => a + b, 0);
-  addCommentBar(pptx, s, `${fmtInt(data.saillants.recup)} enfants récupérés au PEV de routine — ${fmtInt(totalEnfants)} doses d'antigènes administrées (co-administration polio + PEV).`);
+  const tableY = 1.4;
+  const rowH = 0.34;
+  const perPage = rowsPerPage(tableY, 5.9, 0.5, rowH);
+  const pages = chunkRows([...bodyRows, totalRow], perPage);
+  pages.forEach((pageRows, idx) => {
+    const s = pptx.addSlide();
+    ctx.addHeader(s, `Récupération des enfants en PEV de routine${suiteSuffix(idx, pages.length)}`, "Enfants vaccinés (EV) par antigène pendant la campagne — toutes tranches d'âge");
+    s.addTable([head, ...pageRows], {
+      x: 0.45, y: tableY, w: W - 0.9, colW,
+      border: { type: "solid", color: "DEE5EE", pt: 0.5 },
+      rowH, valign: "middle", fontFace: "Calibri", fontSize: 10,
+      autoPage: false,
+    });
+    addCommentBar(pptx, s, `${fmtInt(data.saillants.recup)} enfants récupérés au PEV de routine — ${fmtInt(totalEnfants)} doses d'antigènes administrées (co-administration polio + PEV).`);
+  });
 }
 
 /* ─── Slide : Surveillance des MPV par ZS ──────────────────────────────── */
@@ -670,28 +689,26 @@ const MAROON_LIGHT = "F3E6E9";
 
 function buildSurveillanceMPV(ctx: SlideCtx): void {
   const { pptx, data } = ctx;
-  const s = pptx.addSlide();
-  ctx.addHeader(s, "Surveillance des MPV par Zone de Santé", "Maladies à potentiel épidémique — recherche active des cas de MEV");
   const t = data.survTotals;
 
-  // Cartes de synthèse (PFA / Rougeole / FJ / TNN).
   const cards: { label: string; value: number }[] = [
     { label: "PFA – Cas", value: t.pfa },
     { label: "Rougeole – Cas", value: t.rougeole },
     { label: "Fièvre Jaune – Cas", value: t.fj },
     { label: "TNN – Cas", value: t.tnn },
   ];
-  const cw = 2.9;
-  const gap = 0.2;
-  const startX = (W - (cards.length * cw + (cards.length - 1) * gap)) / 2;
-  cards.forEach((c, i) => {
-    const x = startX + i * (cw + gap);
-    s.addShape(pptx.ShapeType.roundRect, { x, y: 1.3, w: cw, h: 1.55, fill: { color: MAROON }, line: { color: MAROON, width: 1 }, rectRadius: 0.08 });
-    s.addText(c.label, { x, y: 1.37, w: cw, h: 0.5, align: "center", valign: "middle", color: "FFFFFF", bold: true, fontSize: 16 });
-    s.addText(fmtInt(c.value), { x, y: 1.85, w: cw, h: 0.9, align: "center", valign: "middle", color: "FFFFFF", bold: true, fontSize: 40 });
-  });
+  const drawCards = (s: PptxGenJS.Slide) => {
+    const cw = 2.9;
+    const gap = 0.2;
+    const startX = (W - (cards.length * cw + (cards.length - 1) * gap)) / 2;
+    cards.forEach((c, i) => {
+      const x = startX + i * (cw + gap);
+      s.addShape(pptx.ShapeType.roundRect, { x, y: 1.3, w: cw, h: 1.55, fill: { color: MAROON }, line: { color: MAROON, width: 1 }, rectRadius: 0.08 });
+      s.addText(c.label, { x, y: 1.37, w: cw, h: 0.5, align: "center", valign: "middle", color: "FFFFFF", bold: true, fontSize: 16 });
+      s.addText(fmtInt(c.value), { x, y: 1.85, w: cw, h: 0.9, align: "center", valign: "middle", color: "FFFFFF", bold: true, fontSize: 40 });
+    });
+  };
 
-  // Tableau par unité (ZS) : PFA / Rougeole / FJ / TNN.
   const head: PptxGenJS.TableCell[] = [
     { text: data.byUnitLabel, options: thHeader({ fill: { color: MAROON } }) },
     { text: "PFA", options: thHeader({ fill: { color: MAROON } }) },
@@ -702,36 +719,46 @@ function buildSurveillanceMPV(ctx: SlideCtx): void {
   const rows = data.survByUnit
     .filter((r) => r.pfa || r.rougeole || r.fj || r.tnn)
     .sort((a, b) => (b.pfa + b.rougeole + b.fj + b.tnn) - (a.pfa + a.rougeole + a.fj + a.tnn));
-  const body: PptxGenJS.TableRow[] = rows.map((r): PptxGenJS.TableCell[] => [
+  const bodyRows: PptxGenJS.TableRow[] = rows.map((r): PptxGenJS.TableCell[] => [
     { text: r.unit, options: tdCell({ bold: true }) },
     { text: fmtInt(r.pfa), options: tdCell({ align: "right" }) },
     { text: fmtInt(r.rougeole), options: tdCell({ align: "right" }) },
     { text: fmtInt(r.fj), options: tdCell({ align: "right" }) },
     { text: fmtInt(r.tnn), options: tdCell({ align: "right" }) },
   ]);
-  const trows: PptxGenJS.TableRow[] = [
-    head,
-    ...body,
-    [
-      { text: "Total", options: thTotal({ fill: { color: MAROON } }) },
-      { text: fmtInt(t.pfa), options: thTotal({ align: "right", fill: { color: MAROON } }) },
-      { text: fmtInt(t.rougeole), options: thTotal({ align: "right", fill: { color: MAROON } }) },
-      { text: fmtInt(t.fj), options: thTotal({ align: "right", fill: { color: MAROON } }) },
-      { text: fmtInt(t.tnn), options: thTotal({ align: "right", fill: { color: MAROON } }) },
-    ],
+  const totalRow: PptxGenJS.TableRow = [
+    { text: "Total", options: thTotal({ fill: { color: MAROON } }) },
+    { text: fmtInt(t.pfa), options: thTotal({ align: "right", fill: { color: MAROON } }) },
+    { text: fmtInt(t.rougeole), options: thTotal({ align: "right", fill: { color: MAROON } }) },
+    { text: fmtInt(t.fj), options: thTotal({ align: "right", fill: { color: MAROON } }) },
+    { text: fmtInt(t.tnn), options: thTotal({ align: "right", fill: { color: MAROON } }) },
   ];
-  s.addShape(pptx.ShapeType.roundRect, { x: 2.4, y: 3.15, w: W - 4.8, h: 0.02, fill: { color: MAROON_LIGHT } });
-  s.addTable(trows, {
-    x: 3.0, y: 3.25, w: W - 6.0, colW: computeColW(W - 6.0, 5, [1.8, 1, 1.2, 1.2, 1]),
-    border: { type: "solid", color: "E7D6DB", pt: 0.5 },
-    rowH: 0.36, valign: "middle", fontFace: "Calibri", fontSize: 12, autoPage: false,
-  });
 
-  if (rows.length === 0) {
-    s.addText("Aucun cas de MPV notifié sur ce périmètre pendant la campagne.", {
-      x: 1, y: 6.1, w: W - 2, h: 0.5, align: "center", fontSize: 15, italic: true, color: GREY,
+  const colW = computeColW(W - 6.0, 5, [1.8, 1, 1.2, 1.2, 1]);
+  const allRows = [...bodyRows, totalRow];
+  // 1ère diapo : table sous les cartes (y 3.25). Diapos suivantes : table en haut.
+  const perPageFirst = rowsPerPage(3.25, 6.9, 0.5, 0.36);
+  const perPageNext = rowsPerPage(1.3, 6.9, 0.5, 0.36);
+  const pages: PptxGenJS.TableRow[][] = [];
+  pages.push(allRows.slice(0, perPageFirst));
+  for (let i = perPageFirst; i < allRows.length; i += perPageNext) pages.push(allRows.slice(i, i + perPageNext));
+
+  pages.forEach((pageRows, idx) => {
+    const s = pptx.addSlide();
+    ctx.addHeader(s, `Surveillance des MPV par Zone de Santé${suiteSuffix(idx, pages.length)}`, "Maladies à potentiel épidémique — recherche active des cas de MEV");
+    const tableY = idx === 0 ? 3.25 : 1.3;
+    if (idx === 0) drawCards(s);
+    s.addTable([head, ...pageRows], {
+      x: 3.0, y: tableY, w: W - 6.0, colW,
+      border: { type: "solid", color: "E7D6DB", pt: 0.5 },
+      rowH: 0.36, valign: "middle", fontFace: "Calibri", fontSize: 12, autoPage: false,
     });
-  }
+    if (idx === 0 && rows.length === 0) {
+      s.addText("Aucun cas de MPV notifié sur ce périmètre pendant la campagne.", {
+        x: 1, y: 6.1, w: W - 2, h: 0.5, align: "center", fontSize: 15, italic: true, color: GREY,
+      });
+    }
+  });
 }
 
 /* ─── Slides 8/9 : Gestion vaccin ──────────────────────────────────────── */
@@ -744,10 +771,7 @@ function buildGestion(
   seuil: number
 ): void {
   const { pptx, data } = ctx;
-  const s = pptx.addSlide();
-  ctx.addHeader(s, `Gestion du vaccin : ${vaccine}`, `Seuil acceptable de perte : ≤ ${seuil} %`);
 
-  // ── Tableau gauche : Flacons reçus / utilisés / rendus / perdus / vaccinés / %perte.
   const head: PptxGenJS.TableCell[] = [
     { text: data.byUnitLabel, options: thHeader() },
     { text: "Flacons\nreçus", options: thHeader() },
@@ -763,60 +787,67 @@ function buildGestion(
   const sPerd = rows.reduce((a, r) => a + r.perdus, 0);
   const sVacc = rows.reduce((a, r) => a + r.vacc, 0);
 
-  const trows: PptxGenJS.TableRow[] = [
-    head,
-    ...rows.map((r): PptxGenJS.TableCell[] => [
-      { text: r.unit, options: tdCell({ bold: true }) },
-      { text: fmtInt(r.flaconsRecus), options: tdCell({ align: "right" }) },
-      { text: fmtInt(r.flaconsUtil), options: tdCell({ align: "right" }) },
-      { text: fmtInt(r.flaconsRendus), options: tdCell({ align: "right" }) },
-      { text: fmtInt(r.perdus), options: tdCell({ align: "right" }) },
-      { text: fmtInt(r.vacc), options: tdCell({ align: "right" }) },
-      { text: fmtPct(r.taux, 2), options: tdCell({ align: "right", bold: true, color: lossColor(r.taux) }) },
-    ]),
-    [
-      { text: "Total", options: thTotal() },
-      { text: fmtInt(sRec), options: thTotal({ align: "right" }) },
-      { text: fmtInt(sUtil), options: thTotal({ align: "right" }) },
-      { text: fmtInt(sRend), options: thTotal({ align: "right" }) },
-      { text: fmtInt(sPerd), options: thTotal({ align: "right" }) },
-      { text: fmtInt(sVacc), options: thTotal({ align: "right" }) },
-      { text: fmtPct(globalTaux, 2), options: thTotal({ align: "right" }) },
-    ],
+  const bodyRows: PptxGenJS.TableRow[] = rows.map((r): PptxGenJS.TableCell[] => [
+    { text: r.unit, options: tdCell({ bold: true }) },
+    { text: fmtInt(r.flaconsRecus), options: tdCell({ align: "right" }) },
+    { text: fmtInt(r.flaconsUtil), options: tdCell({ align: "right" }) },
+    { text: fmtInt(r.flaconsRendus), options: tdCell({ align: "right" }) },
+    { text: fmtInt(r.perdus), options: tdCell({ align: "right" }) },
+    { text: fmtInt(r.vacc), options: tdCell({ align: "right" }) },
+    { text: fmtPct(r.taux, 2), options: tdCell({ align: "right", bold: true, color: lossColor(r.taux) }) },
+  ]);
+  const totalRow: PptxGenJS.TableRow = [
+    { text: "Total", options: thTotal() },
+    { text: fmtInt(sRec), options: thTotal({ align: "right" }) },
+    { text: fmtInt(sUtil), options: thTotal({ align: "right" }) },
+    { text: fmtInt(sRend), options: thTotal({ align: "right" }) },
+    { text: fmtInt(sPerd), options: thTotal({ align: "right" }) },
+    { text: fmtInt(sVacc), options: thTotal({ align: "right" }) },
+    { text: fmtPct(globalTaux, 2), options: thTotal({ align: "right" }) },
   ];
-  s.addTable(trows, {
-    x: 0.45, y: 1.3, w: 7.1, colW: [1.6, 0.95, 0.95, 0.95, 0.95, 1.05, 0.65],
-    border: { type: "solid", color: "DEE5EE", pt: 0.5 },
-    rowH: 0.38, valign: "middle", fontFace: "Calibri",
-  });
 
-  // ── Bar chart horizontal à droite : Répartition du taux de perte.
   const labels = rows.map((r) => r.unit);
   const values = rows.map((r) => (r.taux == null ? 0 : Math.round(r.taux * 100) / 100));
   const hasData = rows.length > 0 && values.some((v) => v !== 0);
-  s.addShape(pptx.ShapeType.roundRect, { x: 7.7, y: 1.3, w: W - 8.15, h: 4.6, fill: { color: "FFFFFF" }, line: { color: "DEE5EE", width: 1 }, rectRadius: 0.06 });
-  s.addText(`Répartition du taux de perte (%) de ${vaccine} par ${data.byUnitLabel}`, {
-    x: 7.8, y: 1.37, w: W - 8.35, h: 0.45, fontSize: 15, bold: true, color: NAVY, align: "center",
-  });
-  if (hasData) {
-    s.addChart(
-      pptx.ChartType.bar,
-      [{ name: `Taux de perte ${vaccine}`, labels, values }],
-      {
-        x: 7.7, y: 1.85, w: W - 8.15, h: 3.95,
-        barDir: "bar", chartColors: [NAVY], showValue: true,
-        dataLabelColor: NAVY_DEEP, dataLabelFontSize: 11, dataLabelFormatCode: '0.00"%"',
-        catAxisLabelFontSize: 11, valAxisLabelFontSize: 11, showLegend: false,
-        valGridLine: { style: "dash", color: "E2E8F0", size: 1 },
-      }
-    );
-  } else {
-    s.addText("Aucune donnée disponible pour ce périmètre.", {
-      x: 7.7, y: 3.3, w: W - 8.15, h: 1, align: "center", fontSize: 15, italic: true, color: GREY,
-    });
-  }
 
-  addCommentBar(pptx, s, gestionComment(globalTaux, vaccine, seuil));
+  const tableY = 1.3;
+  const rowH = 0.38;
+  const perPage = rowsPerPage(tableY, 5.85, 0.6, rowH);
+  const pages = chunkRows([...bodyRows, totalRow], perPage);
+  pages.forEach((pageRows, idx) => {
+    const s = pptx.addSlide();
+    ctx.addHeader(s, `Gestion du vaccin : ${vaccine}${suiteSuffix(idx, pages.length)}`, `Seuil acceptable de perte : ≤ ${seuil} %`);
+    s.addTable([head, ...pageRows], {
+      x: 0.45, y: tableY, w: 7.1, colW: [1.6, 0.95, 0.95, 0.95, 0.95, 1.05, 0.65],
+      border: { type: "solid", color: "DEE5EE", pt: 0.5 },
+      rowH, valign: "middle", fontFace: "Calibri",
+    });
+
+    // Graphique de répartition du taux de perte — uniquement sur la 1ère diapo.
+    s.addShape(pptx.ShapeType.roundRect, { x: 7.7, y: 1.3, w: W - 8.15, h: 4.6, fill: { color: "FFFFFF" }, line: { color: "DEE5EE", width: 1 }, rectRadius: 0.06 });
+    s.addText(`Répartition du taux de perte (%) de ${vaccine} par ${data.byUnitLabel}`, {
+      x: 7.8, y: 1.37, w: W - 8.35, h: 0.45, fontSize: 15, bold: true, color: NAVY, align: "center",
+    });
+    if (idx === 0 && hasData) {
+      s.addChart(
+        pptx.ChartType.bar,
+        [{ name: `Taux de perte ${vaccine}`, labels, values }],
+        {
+          x: 7.7, y: 1.85, w: W - 8.15, h: 3.95,
+          barDir: "bar", chartColors: [NAVY], showValue: true,
+          dataLabelColor: NAVY_DEEP, dataLabelFontSize: 11, dataLabelFormatCode: '0.00"%"',
+          catAxisLabelFontSize: 11, valAxisLabelFontSize: 11, showLegend: false,
+          valGridLine: { style: "dash", color: "E2E8F0", size: 1 },
+        }
+      );
+    } else {
+      s.addText(idx === 0 ? "Aucune donnée disponible pour ce périmètre." : "Voir le graphique sur la première diapositive.", {
+        x: 7.7, y: 3.3, w: W - 8.15, h: 1, align: "center", fontSize: 14, italic: true, color: GREY,
+      });
+    }
+
+    addCommentBar(pptx, s, gestionComment(globalTaux, vaccine, seuil));
+  });
 }
 
 /* ─── Slide 10 : Surveillance MAPI ─────────────────────────────────────── */
@@ -846,27 +877,39 @@ function buildMapi(ctx: SlideCtx): void {
 
 function buildProblemes(ctx: SlideCtx): void {
   const { pptx, data } = ctx;
-  const s = pptx.addSlide();
-  ctx.addHeader(s, "Problèmes rencontrés / Actions correctrices");
-  const head = ["Problèmes identifiés", "Causes", "ZS concernées", "Solutions proposées"];
-  const empty: PptxGenJS.TableCell[] = [
-    { text: "Aucun problème majeur détecté par l'analyse sur ce périmètre — indicateurs conformes aux seuils.", options: tdCell({ fontSize: 14, italic: true, color: GREY, colspan: 4, align: "center" }) },
-  ];
-  const rows: PptxGenJS.TableRow[] = [
-    head.map((h) => ({ text: h, options: thHeader({ fontSize: 15 }) })),
-    ...(data.problemes.length === 0
-      ? [empty]
-      : data.problemes.map((p): PptxGenJS.TableCell[] => [
-          { text: p.probleme, options: tdCell({ bold: true, fontSize: 13 }) },
-          { text: p.causes, options: tdCell({ fontSize: 13 }) },
-          { text: p.zs, options: tdCell({ align: "center", fontSize: 13 }) },
-          { text: p.solutions, options: tdCell({ fontSize: 13 }) },
-        ])),
-  ];
-  s.addTable(rows, {
-    x: 0.45, y: 1.35, w: W - 0.9, colW: [3.4, 3.0, 2.0, 3.5],
-    border: { type: "solid", color: "DEE5EE", pt: 0.5 },
-    rowH: 0.6, valign: "middle", fontFace: "Calibri", autoPage: false,
+  const head: PptxGenJS.TableCell[] = ["Problèmes identifiés", "Causes", "ZS concernées", "Solutions proposées"]
+    .map((h) => ({ text: h, options: thHeader({ fontSize: 15 }) }));
+
+  if (data.problemes.length === 0) {
+    const s = pptx.addSlide();
+    ctx.addHeader(s, "Problèmes rencontrés / Actions correctrices");
+    s.addTable([head, [
+      { text: "Aucun problème majeur détecté par l'analyse sur ce périmètre — indicateurs conformes aux seuils.", options: tdCell({ fontSize: 14, italic: true, color: GREY, colspan: 4, align: "center" }) },
+    ]], {
+      x: 0.45, y: 1.35, w: W - 0.9, colW: [3.4, 3.0, 2.0, 3.5],
+      border: { type: "solid", color: "DEE5EE", pt: 0.5 },
+      rowH: 0.6, valign: "middle", fontFace: "Calibri", autoPage: false,
+    });
+    return;
+  }
+
+  const bodyRows: PptxGenJS.TableRow[] = data.problemes.map((p): PptxGenJS.TableCell[] => [
+    { text: p.probleme, options: tdCell({ bold: true, fontSize: 13 }) },
+    { text: p.causes, options: tdCell({ fontSize: 13 }) },
+    { text: p.zs, options: tdCell({ align: "center", fontSize: 13 }) },
+    { text: p.solutions, options: tdCell({ fontSize: 13 }) },
+  ]);
+
+  // Lignes au contenu dense : on limite à 4 problèmes par diapo.
+  const pages = chunkRows(bodyRows, 4);
+  pages.forEach((pageRows, idx) => {
+    const s = pptx.addSlide();
+    ctx.addHeader(s, `Problèmes rencontrés / Actions correctrices${suiteSuffix(idx, pages.length)}`);
+    s.addTable([head, ...pageRows], {
+      x: 0.45, y: 1.35, w: W - 0.9, colW: [3.4, 3.0, 2.0, 3.5],
+      border: { type: "solid", color: "DEE5EE", pt: 0.5 },
+      rowH: 0.6, valign: "middle", fontFace: "Calibri", autoPage: false,
+    });
   });
 }
 
@@ -909,6 +952,25 @@ function tdCell(extra: Partial<PptxGenJS.TableCellProps> = {}): PptxGenJS.TableC
     color: NAVY_DEEP, fontSize: 11, valign: "middle", fontFace: "Calibri",
     fill: { color: "FFFFFF" }, ...extra,
   };
+}
+
+/** Découpe un tableau (corps + total) en pages de `perPage` lignes max. */
+function chunkRows<T>(rows: T[], perPage: number): T[][] {
+  if (perPage <= 0 || rows.length <= perPage) return [rows];
+  const out: T[][] = [];
+  for (let i = 0; i < rows.length; i += perPage) out.push(rows.slice(i, i + perPage));
+  return out;
+}
+
+/** Nombre de lignes de corps tenant dans la hauteur disponible. */
+function rowsPerPage(tableTop: number, bottom: number, headerH: number, rowH: number): number {
+  return Math.max(3, Math.floor((bottom - tableTop - headerH) / rowH));
+}
+
+/** Suffixe « (suite) » pour les diapos additionnelles d'un même tableau. */
+function suiteSuffix(idx: number, total: number): string {
+  if (total <= 1) return "";
+  return idx === 0 ? "" : ` (suite ${idx + 1}/${total})`;
 }
 
 function computeColW(totalW: number, n: number, weights: number[]): number[] {

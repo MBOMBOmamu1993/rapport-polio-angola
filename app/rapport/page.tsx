@@ -125,6 +125,59 @@ function computeProblemes(byUnit: UnitAgg[], t: Totals): ProblemeRow[] {
     });
   }
 
+  const vaccTotal = t.nvpo2Vacc + t.vpobVacc;
+
+  // 7. Non-rapportage des enfants récupérés en PEV de routine.
+  const recupTotal = t.antigenesEV.reduce((a, b) => a + b, 0);
+  if (vaccTotal > 0 && t.recup === 0 && recupTotal === 0) {
+    out.push({
+      probleme: "Non-rapportage des enfants récupérés en PEV de routine",
+      causes: "Volet récupération PEV non rempli dans le masque malgré une campagne réalisée (co-administration non tracée)",
+      zs: "Toutes les ZS du périmètre",
+      solutions: "Sensibiliser les équipes à enregistrer systématiquement les antigènes de routine administrés et compléter le volet récupération PEV",
+    });
+  }
+
+  // 8. Non-notification de la surveillance des MEV (MPV).
+  const survTotal = t.survPFA + t.survRougeole + t.survFJ + t.survTNN;
+  if (vaccTotal > 0 && survTotal === 0) {
+    out.push({
+      probleme: "Non-notification de la surveillance des MEV (MPV)",
+      causes: "Aucun cas PFA / Rougeole / Fièvre Jaune / TNN notifié — recherche active probablement non documentée",
+      zs: "Toutes les ZS du périmètre",
+      solutions: "Renforcer la recherche active des cas de MEV pendant la campagne et documenter même les notifications « zéro cas »",
+    });
+  }
+
+  // 9. Non-notification des MAPI.
+  if (vaccTotal > 0 && t.mapiMineures === 0 && t.mapiGraves === 0) {
+    out.push({
+      probleme: "Non-notification des MAPI",
+      causes: "Aucune MAPI (mineure ou grave) notifiée malgré le volume de doses administrées — sous-notification probable",
+      zs: "Toutes les ZS du périmètre",
+      solutions: "Rappeler aux équipes la notification systématique des MAPI, y compris les manifestations mineures, et documenter le « zéro cas »",
+    });
+  }
+
+  // 10. Incohérences des données (taux de perte négatif / complétude > 100 %).
+  const incoh = byUnit
+    .filter((u) => {
+      const nv = tauxPerte(u.nvpo2Vacc, u.nvpo2FlaconsUtil, NVPO2_DOSES_PAR_FLACON);
+      const vp = tauxPerte(u.vpobVacc, u.vpobFlaconsUtil, VPOB_DOSES_PAR_FLACON);
+      const perteNeg = (nv != null && nv < 0) || (vp != null && vp < 0);
+      const complAberr = u.vaccAttendus > 0 && u.vaccRecus > u.vaccAttendus;
+      return perteNeg || complAberr;
+    })
+    .map((u) => u.unit);
+  if (incoh.length > 0) {
+    out.push({
+      probleme: "Incohérences des données saisies",
+      causes: "Enfants vaccinés supérieurs aux doses disponibles (taux de perte négatif) ou rapports reçus > attendus : erreurs de saisie flacons / dénombrement",
+      zs: joinUnits(incoh),
+      solutions: "Vérifier et corriger la saisie des flacons utilisés et des cibles dans le masque, recroiser avec les fiches de pointage",
+    });
+  }
+
   return out;
 }
 
@@ -203,10 +256,12 @@ export default function RapportPage() {
 
     // Construction du tableau complétude par jour pour chaque unité.
     const completudeByUnit: CompletudeRow[] = byUnit.map((a) => {
+      // Complétude journalière = rapports reçus ce jour ÷ rapports attendus
+      // (total campagne). Le cumul des jours redonne la complétude globale et
+      // ne peut donc pas dépasser 100 % quand reçus ≤ attendus.
       const daily = Array.from({ length: nbJours }, (_, i) => {
         const recus = a.rapportsRecusDaily[i] ?? 0;
-        const att = a.vaccAttendus / Math.max(1, nbJours);
-        return { recus, couv: att > 0 ? (recus / att) * 100 : null };
+        return { recus, couv: a.vaccAttendus > 0 ? (recus / a.vaccAttendus) * 100 : null };
       });
       return {
         unit: a.unit,
@@ -277,13 +332,19 @@ export default function RapportPage() {
       const report = buildReport();
       try {
         const { renderZSMap, normalizeZS } = await import("@/lib/zs-map");
-        // Carte de localisation : on surligne les ZS du périmètre sélectionné.
-        const highlight = new Set<string>();
+        // Carte : ZS du périmètre colorées selon leur complétude obtenue.
+        const byZS = new Map<string, { att: number; rec: number }>();
         for (const r of filtered) {
           const k = normalizeZS(r.zs);
-          if (k) highlight.add(k);
+          if (!k) continue;
+          const acc = byZS.get(k) ?? { att: 0, rec: 0 };
+          acc.att += r.vaccAttendus;
+          acc.rec += r.vaccRecus;
+          byZS.set(k, acc);
         }
-        report.scopeMapPng = highlight.size > 0 ? await renderZSMap(highlight) : null;
+        const completudeByZS = new Map<string, number>();
+        for (const [k, v] of byZS) completudeByZS.set(k, v.att > 0 ? (v.rec / v.att) * 100 : 0);
+        report.scopeMapPng = completudeByZS.size > 0 ? await renderZSMap(completudeByZS) : null;
       } catch {
         report.scopeMapPng = null;
       }
