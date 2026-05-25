@@ -16,7 +16,7 @@ import {
 } from "@/lib/analytics";
 import { fmtInt, fmtPct } from "@/lib/format";
 import { fetchNational } from "@/lib/national";
-import type { MasqueData } from "@/lib/parse-masque";
+import { ANTIGENES, type MasqueData } from "@/lib/parse-masque";
 import type { CompletudeRow, ProblemeRow, ReportData } from "@/lib/export-report-pptx";
 
 const DEFAULT_PROBLEMES: ProblemeRow[] = [
@@ -109,6 +109,10 @@ export default function RapportPage() {
       };
     });
     const recupByUnit = byUnit.map((a) => ({ unit: a.unit, value: a.recup }));
+    const recupAntigenByUnit = byUnit.map((a) => ({ unit: a.unit, ev: a.antigenesEV }));
+    const survByUnit = byUnit.map((a) => ({
+      unit: a.unit, pfa: a.survPFA, rougeole: a.survRougeole, fj: a.survFJ, tnn: a.survTNN,
+    }));
 
     return {
       province: filters.province ?? data!.meta.province,
@@ -148,6 +152,11 @@ export default function RapportPage() {
       nvpo2Gestion: nvpo2Gestion(byUnit),
       vpobGestion: vpobGestion(byUnit),
       recupByUnit,
+      antigenLabels: ANTIGENES.map((a) => a.label),
+      recupAntigenByUnit,
+      recupAntigenTotals: ANTIGENES.map((_, j) => t.antigenesEV[j] ?? 0),
+      survByUnit,
+      survTotals: { pfa: t.survPFA, rougeole: t.survRougeole, fj: t.survFJ, tnn: t.survTNN },
       problemes,
     };
   }
@@ -258,9 +267,10 @@ export default function RapportPage() {
             "Spatialisation de la complétude (carte RDC des Zones de Santé)",
             "Couvertures vaccinales nVPO2 par jour (cible / vaccinés / couverture)",
             "Couvertures vaccinales VPOb par jour",
-            "Récupération PEV de routine (co-administration)",
+            "Récupération PEV de routine — enfants vaccinés par antigène (EV)",
             "Gestion du vaccin nVPO2 (flacons reçus / utilisés / rendus / perdus)",
             "Gestion du vaccin VPOb",
+            "Surveillance des MPV par ZS (PFA, Rougeole, FJ, TNN)",
             "Surveillance des MAPI",
             "Problèmes / Actions correctrices",
             "Merci pour votre attention",
