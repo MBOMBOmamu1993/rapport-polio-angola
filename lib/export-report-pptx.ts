@@ -1,7 +1,8 @@
 /**
  * Génération du rapport PowerPoint « Campagne de vaccination polio synchronisée
- * avec l'Angola » — reproduit le modèle fourni en ne gardant que la composante
- * polio (nVPO2 et VPOb), co-administration incluse.
+ * avec l'Angola » — reproduit le modèle officiel en ne gardant que la composante
+ * polio (nVPO2 et VPOb), co-administration incluse. Chaque indicateur est présenté
+ * par Zone de Santé sous forme de tableau + graphique + commentaire dynamique.
  */
 
 import PptxGenJS from "pptxgenjs";
@@ -9,6 +10,21 @@ import PptxGenJS from "pptxgenjs";
 export interface UnitValue {
   unit: string;
   value: number | null;
+}
+
+export interface CoverageRow {
+  unit: string;
+  cible: number;
+  vacc: number;
+  cv: number | null;
+}
+
+export interface GestionRow {
+  unit: string;
+  flaconsUtil: number;
+  perdus: number;
+  vacc: number;
+  taux: number | null;
 }
 
 export interface ProblemeRow {
@@ -43,14 +59,13 @@ export interface ReportData {
     mapiGraves: number;
   };
   completudeByUnit: UnitValue[];
-  nvpo2CVByUnit: UnitValue[];
-  vpobCVByUnit: UnitValue[];
+  nvpo2Coverage: CoverageRow[];
+  vpobCoverage: CoverageRow[];
+  nvpo2Gestion: GestionRow[];
+  vpobGestion: GestionRow[];
   recupByUnit: UnitValue[];
-  nvpo2PerteByUnit: UnitValue[];
-  vpobPerteByUnit: UnitValue[];
   problemes: ProblemeRow[];
-  commentNvpo2: string;
-  commentVpob: string;
+  completudeMapPng?: string | null;
 }
 
 // ─── Design tokens (OMS) ────────────────────────────────────────────────────
@@ -89,6 +104,22 @@ function fmtInt(n: number): string {
   return Math.round(n || 0).toLocaleString("fr-FR");
 }
 
+function covTone(v: number | null): string {
+  if (v === null) return GREY;
+  if (v >= 95) return GREEN;
+  if (v >= 90) return ORANGE;
+  return RED;
+}
+function lossTone(v: number | null): string {
+  if (v === null) return GREY;
+  if (v < 0 || v > 15) return RED;
+  if (v > 10) return ORANGE;
+  return GREEN;
+}
+function slug(s: string): string {
+  return s.replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 40) || "rapport";
+}
+
 export async function exportReportPPT(data: ReportData): Promise<void> {
   const pptx = new PptxGenJS();
   pptx.defineLayout({ name: "WIDE", width: W, height: H });
@@ -108,16 +139,16 @@ export async function exportReportPPT(data: ReportData): Promise<void> {
     slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: W, h: 0.95, fill: { color: OMS } });
     slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0.95, w: W, h: 0.06, fill: { color: OMS_DEEP } });
     slide.addText(title, {
-      x: 0.55, y: 0.06, w: W - 2.2, h: 0.83, fontSize: 21, bold: true, color: "FFFFFF",
+      x: 0.55, y: 0.06, w: W - 2.2, h: 0.83, fontSize: 20, bold: true, color: "FFFFFF",
       align: "left", valign: "middle", fontFace: "Calibri",
     });
     if (pev) slide.addImage({ data: pev, x: W - 1.45, y: 0.12, w: 0.72, h: 0.72 });
     if (oms) slide.addImage({ data: oms, x: W - 0.72, y: 0.18, w: 0.6, h: 0.6 });
     slide.addText("Campagne de vaccination polio synchronisée avec l'Angola", {
-      x: 0.55, y: H - 0.38, w: W - 3, h: 0.3, fontSize: 8, color: GREY, align: "left",
+      x: 0.55, y: H - 0.36, w: W - 3, h: 0.28, fontSize: 8, color: GREY, align: "left",
     });
     slide.addText(data.scopeLabel, {
-      x: W - 4.2, y: H - 0.38, w: 4, h: 0.3, fontSize: 8, color: OMS_DARK, align: "right", bold: true,
+      x: W - 4.2, y: H - 0.36, w: 4, h: 0.28, fontSize: 8, color: OMS_DARK, align: "right", bold: true,
     });
   };
 
@@ -125,9 +156,7 @@ export async function exportReportPPT(data: ReportData): Promise<void> {
   {
     const s = pptx.addSlide();
     s.background = { color: OMS_DEEP };
-    s.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: W * 0.42, h: H, fill: { color: OMS_DEEP } });
     if (cover) s.addImage({ data: cover, x: W * 0.42, y: 0, w: W * 0.58, h: H, sizing: { type: "cover", w: W * 0.58, h: H } });
-    // Voile dégradé pour lisibilité du titre.
     s.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: W * 0.46, h: H, fill: { color: OMS_DEEP, transparency: 8 } });
 
     if (pev) s.addImage({ data: pev, x: 0.6, y: 0.5, w: 1.0, h: 1.0 });
@@ -216,24 +245,57 @@ export async function exportReportPPT(data: ReportData): Promise<void> {
   }
 
   // ── Slide 4 : Complétude des rapports par ZS ──────────────────────────────────
-  addBarSlide(pptx, addHeader, "Complétude des rapports par Zone de Santé", data.completudeByUnit, OMS, "%", 100, "Source : masque de saisie de la campagne");
+  addBarSlide(
+    pptx, addHeader,
+    "Complétude des rapports par Zone de Santé",
+    data.completudeByUnit, OMS, "%", 100,
+    `Complétude globale de ${fmtPct(data.saillants.completude)} (${fmtInt(data.saillants.completudeRecus)} rapports reçus sur ${fmtInt(data.saillants.completudeAttendus)} attendus).`
+  );
 
-  // ── Slide 5 : Couverture nVPO2 ────────────────────────────────────────────────
-  addBarSlide(pptx, addHeader, "Couvertures vaccinales nVPO2, par Zone de Santé", data.nvpo2CVByUnit, OMS, "%", 100, data.commentNvpo2, true);
+  // ── Slide : Spatialisation de la complétude (carte choroplèthe des ZS) ─────────
+  if (data.completudeMapPng) {
+    const s = pptx.addSlide();
+    addHeader(s, "Spatialisation de la complétude par Zone de Santé");
+    s.addImage({ data: data.completudeMapPng, x: 1.4, y: 1.15, w: 7.2, h: 5.4, sizing: { type: "contain", w: 7.2, h: 5.4 } });
+    // Légende.
+    const legend: { c: string; t: string }[] = [
+      { c: "E23636", t: "< 80 %" },
+      { c: "F29E0B", t: "80 – 89 %" },
+      { c: "66BEE7", t: "90 – 99 %" },
+      { c: "0093D5", t: "100 %" },
+      { c: "E2E8F0", t: "Pas de donnée" },
+    ];
+    legend.forEach((l, i) => {
+      const y = 2.2 + i * 0.55;
+      s.addShape(pptx.ShapeType.rect, { x: 9.4, y, w: 0.4, h: 0.36, fill: { color: l.c }, line: { color: "CBD5E1", width: 0.5 } });
+      s.addText(l.t, { x: 9.95, y, w: 2.8, h: 0.36, valign: "middle", fontSize: 12, color: OMS_DEEP });
+    });
+    s.addText("Complétude des rapports de vaccination par ZS sur le périmètre sélectionné.", {
+      x: 9.4, y: 5.2, w: 3.4, h: 1.0, fontSize: 10, italic: true, color: GREY,
+    });
+  }
 
-  // ── Slide 6 : Couverture VPOb ─────────────────────────────────────────────────
-  addBarSlide(pptx, addHeader, "Couvertures vaccinales VPOb, par Zone de Santé", data.vpobCVByUnit, OMS_DARK, "%", 100, data.commentVpob, true);
+  // ── Slide 5 : Couvertures vaccinales nVPO2 (tableau + graphique + commentaire) ─
+  addCoverageSlide(pptx, addHeader, "Couvertures vaccinales nVPO2, par Zone de Santé", data.nvpo2Coverage, data.byUnitLabel, "nVPO2", OMS, data.saillants.nvpo2CV);
 
-  // ── Slide 7 : Récupération PEV routine ────────────────────────────────────────
-  addBarSlide(pptx, addHeader, "Récupération des enfants en PEV de routine (co-administration)", data.recupByUnit, GREEN, "", null, "Enfants récupérés et orientés vers le PEV de routine pendant la campagne polio");
+  // ── Slide 6 : Couvertures vaccinales VPOb ─────────────────────────────────────
+  addCoverageSlide(pptx, addHeader, "Couvertures vaccinales VPOb, par Zone de Santé", data.vpobCoverage, data.byUnitLabel, "VPOb", OMS_DARK, data.saillants.vpobCV);
 
-  // ── Slide 8 : Gestion vaccin nVPO2 ────────────────────────────────────────────
-  addBarSlide(pptx, addHeader, "Gestion des vaccins : nVPO2 (taux de perte par ZS)", data.nvpo2PerteByUnit, ORANGE, "%", null, "Seuil acceptable du taux de perte nVPO2 : ≤ 11 %");
+  // ── Slide 7 : Récupération PEV de routine ─────────────────────────────────────
+  addBarSlide(
+    pptx, addHeader,
+    "Récupération des enfants en PEV de routine (co-administration)",
+    data.recupByUnit, GREEN, "", null,
+    `${fmtInt(data.saillants.recup)} enfants récupérés et orientés vers le PEV de routine pendant la campagne polio.`
+  );
 
-  // ── Slide 9 : Gestion vaccin VPOb ─────────────────────────────────────────────
-  addBarSlide(pptx, addHeader, "Gestion des vaccins : VPOb (taux de perte par ZS)", data.vpobPerteByUnit, ORANGE, "%", null, "Seuil acceptable du taux de perte VPOb : ≤ 10 %");
+  // ── Slide 8 : Gestion du vaccin nVPO2 (tableau + graphique + commentaire) ──────
+  addGestionSlide(pptx, addHeader, "Gestion des vaccins : nVPO2", data.nvpo2Gestion, data.byUnitLabel, "nVPO2", data.saillants.nvpo2Perte, 11);
 
-  // ── Slide 10 : Surveillance MAPI ──────────────────────────────────────────────
+  // ── Slide 9 : Gestion du vaccin VPOb ──────────────────────────────────────────
+  addGestionSlide(pptx, addHeader, "Gestion des vaccins : VPOb", data.vpobGestion, data.byUnitLabel, "VPOb", data.saillants.vpobPerte, 10);
+
+  // ── Slide 10 : Surveillance des MAPI ──────────────────────────────────────────
   {
     const s = pptx.addSlide();
     addHeader(s, "Surveillance des MAPI");
@@ -287,6 +349,132 @@ export async function exportReportPPT(data: ReportData): Promise<void> {
   await pptx.writeFile({ fileName: `Rapport_Polio_Angola_${slug(data.scopeLabel)}.pptx` });
 }
 
+// ── Slide « couverture » : graphique (gauche) + tableau (droite) + commentaire ──
+function addCoverageSlide(
+  pptx: PptxGenJS,
+  addHeader: (s: PptxGenJS.Slide, t: string) => void,
+  title: string,
+  rows: CoverageRow[],
+  unitLabel: string,
+  vaccine: string,
+  color: string,
+  globalCV: number | null
+): void {
+  const s = pptx.addSlide();
+  addHeader(s, title);
+
+  const labels = rows.map((r) => r.unit);
+  const values = rows.map((r) => (r.cv == null ? 0 : +r.cv.toFixed(1)));
+  const hasData = rows.length > 0 && values.some((v) => v !== 0);
+
+  // Graphique (colonnes) — couverture % par unité.
+  if (hasData) {
+    s.addChart(pptx.ChartType.bar, [{ name: "Couverture", labels, values }], {
+      x: 0.4, y: 1.2, w: 6.3, h: 4.6,
+      barDir: "col", chartColors: [color], showValue: true,
+      dataLabelColor: OMS_DEEP, dataLabelFontSize: 8, dataLabelFormatCode: '0"%"',
+      valAxisMaxVal: 100, valAxisMinVal: 0,
+      catAxisLabelFontSize: 8, catAxisLabelRotate: labels.length > 6 ? 45 : 0,
+      valAxisLabelFontSize: 8, showLegend: false,
+      valGridLine: { style: "dash", color: "E23636", size: 1 },
+    });
+  } else {
+    s.addText("Aucune donnée disponible pour ce périmètre.", {
+      x: 0.4, y: 3.0, w: 6.3, h: 1, align: "center", fontSize: 13, italic: true, color: GREY,
+    });
+  }
+
+  // Tableau (droite) — Cible / Vaccinés / CV % par unité + Total.
+  const sumCible = rows.reduce((a, r) => a + r.cible, 0);
+  const sumVacc = rows.reduce((a, r) => a + r.vacc, 0);
+  const totalCV = sumCible ? (sumVacc / sumCible) * 100 : null;
+  const head = [unitLabel, "Cible", "Vaccinés", "CV"];
+  const trows: PptxGenJS.TableRow[] = [
+    head.map((h) => ({ text: h, options: { bold: true, color: "FFFFFF", fill: { color: OMS_DARK }, fontSize: 9, align: "center" as const, valign: "middle" as const } })),
+    ...rows.map((r) => [
+      { text: r.unit, options: { fontSize: 8, color: OMS_DEEP } },
+      { text: fmtInt(r.cible), options: { fontSize: 8, color: OMS_DEEP, align: "right" as const } },
+      { text: fmtInt(r.vacc), options: { fontSize: 8, color: OMS_DEEP, align: "right" as const } },
+      { text: fmtPct(r.cv), options: { fontSize: 8, color: covTone(r.cv), align: "right" as const, bold: true } },
+    ]),
+    [
+      { text: "Total", options: { fontSize: 9, color: "FFFFFF", fill: { color: OMS }, bold: true } },
+      { text: fmtInt(sumCible), options: { fontSize: 9, color: "FFFFFF", fill: { color: OMS }, align: "right" as const, bold: true } },
+      { text: fmtInt(sumVacc), options: { fontSize: 9, color: "FFFFFF", fill: { color: OMS }, align: "right" as const, bold: true } },
+      { text: fmtPct(totalCV), options: { fontSize: 9, color: "FFFFFF", fill: { color: OMS }, align: "right" as const, bold: true } },
+    ],
+  ];
+  s.addTable(trows, {
+    x: 6.9, y: 1.2, w: 6.0, colW: [2.4, 1.2, 1.4, 1.0],
+    border: { type: "solid", color: "CBD5E1", pt: 0.5 },
+    autoPage: false, valign: "middle", fontFace: "Calibri",
+  });
+
+  addCommentBar(pptx, s, coverageComment(rows, globalCV, vaccine));
+}
+
+// ── Slide « gestion vaccin » : tableau (gauche) + graphique perte (droite) ──────
+function addGestionSlide(
+  pptx: PptxGenJS,
+  addHeader: (s: PptxGenJS.Slide, t: string) => void,
+  title: string,
+  rows: GestionRow[],
+  unitLabel: string,
+  vaccine: string,
+  globalTaux: number | null,
+  seuil: number
+): void {
+  const s = pptx.addSlide();
+  addHeader(s, title);
+
+  // Tableau (gauche) : Flacons utilisés / Perdus / Enfants vaccinés / Taux de perte.
+  const sumUtil = rows.reduce((a, r) => a + r.flaconsUtil, 0);
+  const sumPerdus = rows.reduce((a, r) => a + r.perdus, 0);
+  const sumVacc = rows.reduce((a, r) => a + r.vacc, 0);
+  const head = [unitLabel, "Flac. util.", "Perdus", "Vaccinés", "Perte"];
+  const trows: PptxGenJS.TableRow[] = [
+    head.map((h) => ({ text: h, options: { bold: true, color: "FFFFFF", fill: { color: OMS_DARK }, fontSize: 9, align: "center" as const, valign: "middle" as const } })),
+    ...rows.map((r) => [
+      { text: r.unit, options: { fontSize: 8, color: OMS_DEEP } },
+      { text: fmtInt(r.flaconsUtil), options: { fontSize: 8, color: OMS_DEEP, align: "right" as const } },
+      { text: fmtInt(r.perdus), options: { fontSize: 8, color: OMS_DEEP, align: "right" as const } },
+      { text: fmtInt(r.vacc), options: { fontSize: 8, color: OMS_DEEP, align: "right" as const } },
+      { text: fmtPct(r.taux), options: { fontSize: 8, color: lossTone(r.taux), align: "right" as const, bold: true } },
+    ]),
+    [
+      { text: "Total", options: { fontSize: 9, color: "FFFFFF", fill: { color: OMS }, bold: true } },
+      { text: fmtInt(sumUtil), options: { fontSize: 9, color: "FFFFFF", fill: { color: OMS }, align: "right" as const, bold: true } },
+      { text: fmtInt(sumPerdus), options: { fontSize: 9, color: "FFFFFF", fill: { color: OMS }, align: "right" as const, bold: true } },
+      { text: fmtInt(sumVacc), options: { fontSize: 9, color: "FFFFFF", fill: { color: OMS }, align: "right" as const, bold: true } },
+      { text: fmtPct(globalTaux), options: { fontSize: 9, color: "FFFFFF", fill: { color: OMS }, align: "right" as const, bold: true } },
+    ],
+  ];
+  s.addTable(trows, {
+    x: 0.35, y: 1.2, w: 6.7, colW: [1.9, 1.3, 1.0, 1.4, 1.1],
+    border: { type: "solid", color: "CBD5E1", pt: 0.5 },
+    autoPage: false, valign: "middle", fontFace: "Calibri",
+  });
+
+  // Graphique (droite) : taux de perte (%) par unité — barres horizontales.
+  const labels = rows.map((r) => r.unit);
+  const values = rows.map((r) => (r.taux == null ? 0 : +r.taux.toFixed(2)));
+  const hasData = rows.length > 0 && values.some((v) => v !== 0);
+  if (hasData) {
+    s.addChart(pptx.ChartType.bar, [{ name: `Taux de perte ${vaccine}`, labels, values }], {
+      x: 7.2, y: 1.2, w: 5.8, h: 4.6,
+      barDir: "bar", chartColors: [ORANGE], showValue: true,
+      dataLabelColor: OMS_DEEP, dataLabelFontSize: 8, dataLabelFormatCode: '0.0"%"',
+      valAxisMinVal: 0, catAxisLabelFontSize: 8, valAxisLabelFontSize: 8, showLegend: false,
+    });
+  } else {
+    s.addText("Aucune donnée disponible pour ce périmètre.", {
+      x: 7.2, y: 3.0, w: 5.8, h: 1, align: "center", fontSize: 13, italic: true, color: GREY,
+    });
+  }
+
+  addCommentBar(pptx, s, gestionComment(globalTaux, vaccine, seuil));
+}
+
 function addBarSlide(
   pptx: PptxGenJS,
   addHeader: (s: PptxGenJS.Slide, t: string) => void,
@@ -295,8 +483,7 @@ function addBarSlide(
   color: string,
   unitSuffix: string,
   max: number | null,
-  comment: string,
-  threshold = false
+  comment: string
 ): void {
   const s = pptx.addSlide();
   addHeader(s, title);
@@ -311,45 +498,41 @@ function addBarSlide(
   } else {
     s.addChart(pptx.ChartType.bar, [{ name: title, labels, values }], {
       x: 0.5, y: 1.25, w: W - 1, h: comment ? 4.6 : 5.4,
-      barDir: "col",
-      chartColors: [color],
-      showValue: true,
-      dataLabelColor: OMS_DEEP,
-      dataLabelFontSize: 9,
+      barDir: "col", chartColors: [color], showValue: true,
+      dataLabelColor: OMS_DEEP, dataLabelFontSize: 9,
       dataLabelFormatCode: unitSuffix === "%" ? '0.0"%"' : "0",
-      valAxisMaxVal: max ?? undefined,
-      valAxisMinVal: 0,
-      catAxisLabelFontSize: 9,
-      catAxisLabelRotate: labels.length > 8 ? 45 : 0,
-      valAxisLabelFontSize: 9,
-      showLegend: false,
-      ...(threshold && max === 100
-        ? { valGridLine: { style: "dash", color: "E23636", size: 1 } }
-        : {}),
+      valAxisMaxVal: max ?? undefined, valAxisMinVal: 0,
+      catAxisLabelFontSize: 9, catAxisLabelRotate: labels.length > 8 ? 45 : 0,
+      valAxisLabelFontSize: 9, showLegend: false,
+      ...(max === 100 ? { valGridLine: { style: "dash", color: "E23636", size: 1 } } : {}),
     });
   }
 
-  if (comment) {
-    s.addShape(pptx.ShapeType.roundRect, { x: 0.5, y: 6.0, w: W - 1, h: 0.85, fill: { color: "E6F5FC" }, line: { color: OMS, width: 1 }, rectRadius: 0.05 });
-    s.addText([
-      { text: "Commentaire : ", options: { bold: true, color: OMS_DARK } },
-      { text: comment, options: { color: OMS_DEEP } },
-    ], { x: 0.7, y: 6.0, w: W - 1.4, h: 0.85, valign: "middle", fontSize: 12 });
-  }
+  if (comment) addCommentBar(pptx, s, comment);
 }
 
-function covTone(v: number | null): string {
-  if (v === null) return GREY;
-  if (v >= 95) return GREEN;
-  if (v >= 90) return ORANGE;
-  return RED;
+function addCommentBar(pptx: PptxGenJS, s: PptxGenJS.Slide, comment: string): void {
+  s.addShape(pptx.ShapeType.roundRect, { x: 0.5, y: 6.0, w: W - 1, h: 0.9, fill: { color: "E6F5FC" }, line: { color: OMS, width: 1 }, rectRadius: 0.05 });
+  s.addText([
+    { text: "Commentaire : ", options: { bold: true, color: OMS_DARK } },
+    { text: comment, options: { color: OMS_DEEP } },
+  ], { x: 0.7, y: 6.0, w: W - 1.4, h: 0.9, valign: "middle", fontSize: 12 });
 }
-function lossTone(v: number | null): string {
-  if (v === null) return GREY;
-  if (v < 0 || v > 15) return RED;
-  if (v > 10) return ORANGE;
-  return GREEN;
+
+function coverageComment(rows: CoverageRow[], globalCV: number | null, vaccine: string): string {
+  if (rows.length === 0) return `Aucune donnée de couverture ${vaccine} disponible pour ce périmètre.`;
+  const below = rows.filter((r) => r.cv != null && r.cv < 95);
+  const base = `Couverture vaccinale ${vaccine} de ${fmtPct(globalCV)} sur le périmètre sélectionné`;
+  if (below.length === 0) return `${base} : objectif de 95 % atteint dans toutes les zones.`;
+  const names = below.map((r) => r.unit).slice(0, 4).join(", ");
+  const extra = below.length > 4 ? `… (${below.length} ZS au total)` : "";
+  return `${base}. ${below.length} zone(s) sous le seuil de 95 % : ${names}${extra} — à renforcer par des passages de rattrapage.`;
 }
-function slug(s: string): string {
-  return s.replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 40) || "rapport";
+
+function gestionComment(globalTaux: number | null, vaccine: string, seuil: number): string {
+  const base = `Taux de perte ${vaccine} de ${fmtPct(globalTaux)} (seuil acceptable ≤ ${seuil} %)`;
+  if (globalTaux == null) return `Données de gestion du vaccin ${vaccine} non disponibles pour ce périmètre.`;
+  if (globalTaux < 0) return `${base}. Un taux négatif traduit une saisie irrégulière des flacons utilisés — à corriger dans l'outil de collecte.`;
+  if (globalTaux > seuil) return `${base} : dépassement à surveiller, vérifier la chaîne du froid et la saisie des flacons.`;
+  return `${base} : performance conforme au seuil.`;
 }
