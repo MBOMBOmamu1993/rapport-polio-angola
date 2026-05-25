@@ -210,7 +210,7 @@ function computeProblemes(byUnit: UnitAgg[], t: Totals, unitLabel: string): Prob
 }
 
 export default function RapportPage() {
-  const { data: localData, filters, setFilter, resetFilters } = useApp();
+  const { data: localData, filters, setFilter, toggleProvince, resetFilter, resetFilters } = useApp();
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [problemes, setProblemes] = useState<ProblemeRow[]>([]);
@@ -235,7 +235,8 @@ export default function RapportPage() {
 
   const opts = useMemo(() => (data ? cascadeOptions(data, filters) : null), [data, filters]);
   const filtered = useMemo(() => (data ? applyFilters(data, filters) : []), [data, filters]);
-  const drill = useMemo(() => resolveDrillLevel(filters), [filters]);
+  const provinceCount = opts?.provinces.length ?? 0;
+  const drill = useMemo(() => resolveDrillLevel(filters, provinceCount), [filters, provinceCount]);
   const t = useMemo(() => totals(filtered), [filtered]);
   const byUnit = useMemo(() => aggregateByUnit(filtered, drill.level), [filtered, drill.level]);
 
@@ -268,8 +269,9 @@ export default function RapportPage() {
       filters.as ? `Aire de Santé : ${filters.as}` :
       filters.zs ? `Zone de Santé : ${filters.zs}` :
       filters.antenne ? `Antenne : ${filters.antenne}` :
-      filters.province ? `Province : ${filters.province}` :
-      `Province : ${data!.meta.province}`;
+      filters.provinces.length === 1 ? `Province : ${filters.provinces[0]}` :
+      filters.provinces.length > 1 ? `Provinces : ${filters.provinces.join(", ")}` :
+      `Niveau national — toutes les provinces`;
 
     // Période dynamique : du premier au dernier jour de campagne saisi.
     const shortJ = (l: string) => l.replace(/jour\s*/i, "J").trim();
@@ -307,7 +309,7 @@ export default function RapportPage() {
     }));
 
     return {
-      province: filters.province ?? data!.meta.province,
+      province: filters.provinces.length === 1 ? filters.provinces[0] : data!.meta.province,
       coverEntity,
       periode,
       dateLabel: new Date().toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" }),
@@ -420,8 +422,9 @@ export default function RapportPage() {
       {source === "national" && nationalData && (
         <div className="rounded-xl border border-navy-100 bg-navy-50 px-4 py-2.5 text-xs text-navy-700">
           🌍 Rapport <strong>niveau pays</strong> — {nationalData.meta.zones.length} ZS consolidées sur{" "}
-          {Array.from(new Set(nationalData.records.map((r) => r.province))).length} province(s). Sélectionnez une
-          province pour cibler, ou laissez « Tous » pour télécharger la situation de toutes les provinces à la fois.
+          {Array.from(new Set(nationalData.records.map((r) => r.province))).length} province(s). Sélectionnez une ou
+          plusieurs provinces pour cibler, ou laissez vide pour télécharger la situation de toutes les provinces à la
+          fois (agrégation par province par défaut).
         </div>
       )}
 
@@ -434,10 +437,16 @@ export default function RapportPage() {
           </button>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Select label="Province" value={filters.province} options={opts!.provinces} onChange={(v) => setFilter("province", v)} />
-          <Select label="Antenne" value={filters.antenne} options={opts!.antennes} onChange={(v) => setFilter("antenne", v)} />
-          <Select label="Zone de Santé" value={filters.zs} options={opts!.zones} onChange={(v) => setFilter("zs", v)} />
-          <Select label="Aire de Santé" value={filters.as} options={opts!.aires} onChange={(v) => setFilter("as", v)} />
+          <MultiSelect
+            label="Province"
+            values={filters.provinces}
+            options={opts!.provinces}
+            onToggle={toggleProvince}
+            onReset={() => resetFilter("provinces")}
+          />
+          <Select label="Antenne" value={filters.antenne} options={opts!.antennes} onChange={(v) => setFilter("antenne", v)} onReset={() => resetFilter("antenne")} />
+          <Select label="Zone de Santé" value={filters.zs} options={opts!.zones} onChange={(v) => setFilter("zs", v)} onReset={() => resetFilter("zs")} />
+          <Select label="Aire de Santé" value={filters.as} options={opts!.aires} onChange={(v) => setFilter("as", v)} onReset={() => resetFilter("as")} />
         </div>
       </section>
 
@@ -536,20 +545,41 @@ function editRow(
   setter((arr) => arr.map((r, j) => (j === index ? { ...r, [key]: value } : r)));
 }
 
+function FilterHeader({ label, active, onReset }: { label: string; active: boolean; onReset: () => void }) {
+  return (
+    <div className="mb-1 flex items-center justify-between gap-2">
+      <span className="text-[11px] font-semibold uppercase tracking-wide text-surface-400">{label}</span>
+      {active && (
+        <button
+          type="button"
+          onClick={onReset}
+          title={`Réinitialiser : ${label}`}
+          aria-label={`Réinitialiser le filtre ${label}`}
+          className="inline-flex h-5 w-5 items-center justify-center rounded-full text-sm leading-none text-surface-400 transition hover:bg-accent-50 hover:text-accent-600"
+        >
+          ↺
+        </button>
+      )}
+    </div>
+  );
+}
+
 function Select({
   label,
   value,
   options,
   onChange,
+  onReset,
 }: {
   label: string;
   value: string | null;
   options: string[];
   onChange: (v: string | null) => void;
+  onReset: () => void;
 }) {
   return (
-    <label className="block">
-      <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-surface-400">{label}</span>
+    <div className="block">
+      <FilterHeader label={label} active={value != null} onReset={onReset} />
       <select
         value={value ?? ""}
         onChange={(e) => onChange(e.target.value || null)}
@@ -560,7 +590,68 @@ function Select({
           <option key={o} value={o}>{o}</option>
         ))}
       </select>
-    </label>
+    </div>
+  );
+}
+
+function MultiSelect({
+  label,
+  values,
+  options,
+  onToggle,
+  onReset,
+}: {
+  label: string;
+  values: string[];
+  options: string[];
+  onToggle: (v: string) => void;
+  onReset: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const summary =
+    values.length === 0 ? "Toutes" : values.length === 1 ? values[0] : `${values.length} provinces sélectionnées`;
+  return (
+    <div className="relative block">
+      <FilterHeader label={label} active={values.length > 0} onReset={onReset} />
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between gap-2 rounded-lg border border-surface-300 bg-white px-3 py-2.5 text-left text-sm font-medium text-navy-700 focus:border-navy-500 focus:outline-none focus:ring-2 focus:ring-navy-200"
+      >
+        <span className="truncate">{summary}</span>
+        <span className="ml-1 text-surface-400">▾</span>
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} aria-hidden />
+          <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-lg border border-surface-200 bg-white p-1 shadow-card">
+            {options.length === 0 && (
+              <div className="px-3 py-2 text-xs text-surface-400">Aucune province</div>
+            )}
+            {options.map((o) => {
+              const checked = values.includes(o);
+              return (
+                <button
+                  key={o}
+                  type="button"
+                  onClick={() => onToggle(o)}
+                  className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-navy-700 hover:bg-navy-50"
+                >
+                  <span
+                    className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[10px] font-bold ${
+                      checked ? "border-navy-700 bg-navy-700 text-white" : "border-surface-300 text-transparent"
+                    }`}
+                  >
+                    ✓
+                  </span>
+                  <span className="truncate">{o}</span>
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 

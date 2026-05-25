@@ -16,21 +16,26 @@ export interface CascadeOptions {
   aires: string[];
 }
 
+// Une province vide (aucune sélection) signifie « toutes les provinces ».
+function inProvinces(r: ASRecord, f: Filters): boolean {
+  return f.provinces.length === 0 || f.provinces.includes(r.province);
+}
+
 export function cascadeOptions(data: MasqueData, f: Filters): CascadeOptions {
   const provinces = uniq(data.records.map((r) => r.province));
   const antennes = uniq(
-    data.records.filter((r) => !f.province || r.province === f.province).map((r) => r.antenne)
+    data.records.filter((r) => inProvinces(r, f)).map((r) => r.antenne)
   );
   const zones = uniq(
     data.records
-      .filter((r) => (!f.province || r.province === f.province) && (!f.antenne || r.antenne === f.antenne))
+      .filter((r) => inProvinces(r, f) && (!f.antenne || r.antenne === f.antenne))
       .map((r) => r.zs)
   );
   const aires = uniq(
     data.records
       .filter(
         (r) =>
-          (!f.province || r.province === f.province) &&
+          inProvinces(r, f) &&
           (!f.antenne || r.antenne === f.antenne) &&
           (!f.zs || r.zs === f.zs)
       )
@@ -42,7 +47,7 @@ export function cascadeOptions(data: MasqueData, f: Filters): CascadeOptions {
 export function applyFilters(data: MasqueData, f: Filters): ASRecord[] {
   return data.records.filter(
     (r) =>
-      (!f.province || r.province === f.province) &&
+      inProvinces(r, f) &&
       (!f.antenne || r.antenne === f.antenne) &&
       (!f.zs || r.zs === f.zs) &&
       (!f.as || r.as === f.as)
@@ -51,24 +56,42 @@ export function applyFilters(data: MasqueData, f: Filters): ASRecord[] {
 
 export type DrillLevel = "province" | "antenne" | "zs" | "as";
 
-export function resolveDrillLevel(f: Filters): { level: DrillLevel; label: string } {
-  // ZS filtrée → on détaille ses Aires de Santé.
+/**
+ * Niveau d'agrégation des tableaux du rapport.
+ * - ZS filtrée → détail par Aire de Santé.
+ * - Antenne filtrée, ou une seule province sélectionnée → détail par Zone de Santé.
+ * - Aucune sélection (niveau pays) ou plusieurs provinces → agrégation par Province
+ *   (par défaut le rapport présente les provinces et non les ZS). Un jeu de données
+ *   mono-province (import local) tombe sur les ZS, l'agrégation par province n'ayant
+ *   alors qu'une seule ligne.
+ */
+export function resolveDrillLevel(
+  f: Filters,
+  provinceCount: number
+): { level: DrillLevel; label: string } {
   if (f.zs) return { level: "as", label: "Aire de Santé" };
-  // Province / Antenne filtrée, ou aucun filtre (par défaut) → on liste les
-  // Zones de Santé du périmètre (et non plus les antennes ou provinces).
-  return { level: "zs", label: "Zone de Santé" };
+  if (f.antenne) return { level: "zs", label: "Zone de Santé" };
+  if (f.provinces.length === 1) return { level: "zs", label: "Zone de Santé" };
+  if (f.provinces.length === 0 && provinceCount <= 1) return { level: "zs", label: "Zone de Santé" };
+  return { level: "province", label: "Province" };
 }
 
 export function scopeLabel(f: Filters): string {
   if (f.as) return `Aire de Santé : ${f.as}`;
   if (f.zs) return `Zone de Santé : ${f.zs}`;
   if (f.antenne) return `Antenne : ${f.antenne}`;
-  if (f.province) return `Province : ${f.province}`;
+  if (f.provinces.length === 1) return `Province : ${f.provinces[0]}`;
+  if (f.provinces.length > 1) return `Provinces : ${f.provinces.join(", ")}`;
   return "Niveau national — toutes les provinces";
 }
 
 export function scopeName(f: Filters, data: MasqueData): string {
-  return f.as ?? f.zs ?? f.antenne ?? f.province ?? data.meta.province ?? "Province";
+  if (f.as) return f.as;
+  if (f.zs) return f.zs;
+  if (f.antenne) return f.antenne;
+  if (f.provinces.length === 1) return f.provinces[0];
+  if (f.provinces.length > 1) return "Provinces sélectionnées";
+  return data.meta.province ?? "Province";
 }
 
 function keyOf(r: ASRecord, level: DrillLevel): string {
