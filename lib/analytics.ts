@@ -104,6 +104,8 @@ export interface UnitAgg {
   vpobDaily: number[];
   /** Rapports reçus par jour de campagne. */
   rapportsRecusDaily: number[];
+  /** Rapports attendus par jour de campagne. */
+  rapportsAttendusDaily: number[];
   /** Enfants vaccinés par antigène (somme par unité) — ordre = ANTIGENES. */
   antigenesEV: number[];
   survPFA: number;
@@ -129,6 +131,7 @@ export function aggregateByUnit(records: ASRecord[], level: DrillLevel): UnitAgg
         nvpo2Daily: new Array(nbJours).fill(0),
         vpobDaily: new Array(nbJours).fill(0),
         rapportsRecusDaily: new Array(nbJours).fill(0),
+        rapportsAttendusDaily: new Array(nbJours).fill(0),
         antigenesEV: new Array(ANTIGENES.length).fill(0),
         survPFA: 0, survRougeole: 0, survFJ: 0, survTNN: 0,
       };
@@ -155,6 +158,7 @@ export function aggregateByUnit(records: ASRecord[], level: DrillLevel): UnitAgg
       a.nvpo2Daily[i] += r.nvpo2Daily[i]?.vaccines ?? 0;
       a.vpobDaily[i] += r.vpobDaily[i]?.vaccines ?? 0;
       a.rapportsRecusDaily[i] += r.nvpo2Daily[i]?.rapportsRecus ?? 0;
+      a.rapportsAttendusDaily[i] += r.nvpo2Daily[i]?.rapportsAttendus ?? 0;
     }
     for (let j = 0; j < a.antigenesEV.length; j++) a.antigenesEV[j] += r.antigenesEV?.[j] ?? 0;
     a.survPFA += r.survPFA ?? 0;
