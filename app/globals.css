@@ -1,0 +1,19 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  @apply bg-surface-50 text-surface-900 antialiased;
+}
+
+@keyframes slidein {
+  from { transform: translateY(-12px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.animate-slidein {
+  animation: slidein 0.3s ease-out;
+}
