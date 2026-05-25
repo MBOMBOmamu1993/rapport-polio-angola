@@ -15,8 +15,8 @@ export function Nav() {
   return (
     <header className="sticky top-0 z-30 navy-bar shadow-navy">
       <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3 md:px-6">
-        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white/95 p-1.5 ring-2 ring-white/30">
-          <Image src="/logo/pev.png" alt="PEV" width={40} height={40} className="h-10 w-10 object-contain" priority />
+        <div className="flex h-12 w-12 items-center justify-center">
+          <Image src="/logo/pev-transparent.png" alt="PEV" width={48} height={48} className="h-12 w-12 object-contain" priority />
         </div>
         <div className="mr-auto leading-tight">
           <div className="text-sm font-bold text-white md:text-base">
