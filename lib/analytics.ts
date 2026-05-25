@@ -5,7 +5,7 @@
  * l'agrégation des graphiques se fait au niveau immédiatement inférieur.
  */
 
-import type { ASRecord, DailyValue, MasqueData } from "./parse-masque";
+import { ANTIGENES, type ASRecord, type DailyValue, type MasqueData } from "./parse-masque";
 import type { Filters } from "./store";
 import { pct } from "./format";
 
@@ -104,6 +104,12 @@ export interface UnitAgg {
   vpobDaily: number[];
   /** Rapports reçus par jour de campagne. */
   rapportsRecusDaily: number[];
+  /** Enfants vaccinés par antigène (somme par unité) — ordre = ANTIGENES. */
+  antigenesEV: number[];
+  survPFA: number;
+  survRougeole: number;
+  survFJ: number;
+  survTNN: number;
 }
 
 export function aggregateByUnit(records: ASRecord[], level: DrillLevel): UnitAgg[] {
@@ -123,6 +129,8 @@ export function aggregateByUnit(records: ASRecord[], level: DrillLevel): UnitAgg
         nvpo2Daily: new Array(nbJours).fill(0),
         vpobDaily: new Array(nbJours).fill(0),
         rapportsRecusDaily: new Array(nbJours).fill(0),
+        antigenesEV: new Array(ANTIGENES.length).fill(0),
+        survPFA: 0, survRougeole: 0, survFJ: 0, survTNN: 0,
       };
       map.set(k, a);
     }
@@ -148,6 +156,11 @@ export function aggregateByUnit(records: ASRecord[], level: DrillLevel): UnitAgg
       a.vpobDaily[i] += r.vpobDaily[i]?.vaccines ?? 0;
       a.rapportsRecusDaily[i] += r.nvpo2Daily[i]?.rapportsRecus ?? 0;
     }
+    for (let j = 0; j < a.antigenesEV.length; j++) a.antigenesEV[j] += r.antigenesEV?.[j] ?? 0;
+    a.survPFA += r.survPFA ?? 0;
+    a.survRougeole += r.survRougeole ?? 0;
+    a.survFJ += r.survFJ ?? 0;
+    a.survTNN += r.survTNN ?? 0;
   }
   return Array.from(map.values()).sort((a, b) => a.unit.localeCompare(b.unit, "fr"));
 }
@@ -184,6 +197,12 @@ export interface Totals {
   pers15: number;
   mapiMineures: number;
   mapiGraves: number;
+  /** Enfants vaccinés par antigène (total) — ordre = ANTIGENES. */
+  antigenesEV: number[];
+  survPFA: number;
+  survRougeole: number;
+  survFJ: number;
+  survTNN: number;
   /** Cumul Vaccinés nVPO2 par jour. */
   nvpo2VaccDaily: number[];
   /** Cumul Vaccinés VPOb par jour. */
@@ -245,6 +264,11 @@ export function totals(records: ASRecord[]): Totals {
     pers15: s((r) => r.pers15),
     mapiMineures: s((r) => r.mapiMineures),
     mapiGraves: s((r) => r.mapiGraves),
+    antigenesEV: ANTIGENES.map((_, j) => records.reduce((acc, r) => acc + (r.antigenesEV?.[j] ?? 0), 0)),
+    survPFA: s((r) => r.survPFA ?? 0),
+    survRougeole: s((r) => r.survRougeole ?? 0),
+    survFJ: s((r) => r.survFJ ?? 0),
+    survTNN: s((r) => r.survTNN ?? 0),
     nvpo2VaccDaily, vpobVaccDaily, recusDaily, attendusDaily,
   };
 }

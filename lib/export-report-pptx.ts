@@ -87,6 +87,13 @@ export interface ReportData {
   nvpo2Gestion: GestionRow[];
   vpobGestion: GestionRow[];
   recupByUnit: UnitValue[];
+  /** Récupération PEV — enfants vaccinés par antigène. */
+  antigenLabels: string[];
+  recupAntigenByUnit: { unit: string; ev: number[] }[];
+  recupAntigenTotals: number[];
+  /** Surveillance des MPV (cas notifiés). */
+  survByUnit: { unit: string; pfa: number; rougeole: number; fj: number; tnn: number }[];
+  survTotals: { pfa: number; rougeole: number; fj: number; tnn: number };
   problemes: ProblemeRow[];
   completudeMapPng?: string | null;
 }
@@ -186,6 +193,7 @@ export async function exportReportPPT(data: ReportData): Promise<void> {
   buildRecup(ctx);
   buildGestion(ctx, "nVPO2", data.nvpo2Gestion, data.saillants.nvpo2Perte, 11);
   buildGestion(ctx, "VPOb", data.vpobGestion, data.saillants.vpobPerte, 10);
+  buildSurveillanceMPV(ctx);
   buildMapi(ctx);
   buildProblemes(ctx);
   buildMerci(ctx);
@@ -295,9 +303,10 @@ function buildPlan(ctx: SlideCtx): void {
     "Complétude des rapports par Zone de Santé",
     "Couvertures vaccinales nVPO2 par jour de campagne",
     "Couvertures vaccinales VPOb par jour de campagne",
-    "Récupération des enfants en PEV de routine (co-administration)",
+    "Récupération PEV de routine — enfants vaccinés par antigène",
     "Gestion du vaccin nVPO2 — flacons & taux de perte",
     "Gestion du vaccin VPOb — flacons & taux de perte",
+    "Surveillance des MPV par Zone de Santé",
     "Surveillance des MAPI",
     "Problèmes rencontrés / Actions correctrices",
   ];
@@ -570,29 +579,120 @@ function buildCoverage(
 function buildRecup(ctx: SlideCtx): void {
   const { pptx, data } = ctx;
   const s = pptx.addSlide();
-  ctx.addHeader(s, "Récupération des enfants en PEV de routine", "Co-administration polio + PEV — enfants orientés pendant la campagne");
+  ctx.addHeader(s, "Récupération des enfants en PEV de routine", "Enfants vaccinés (EV) par antigène pendant la campagne — toutes tranches d'âge");
 
-  const labels = data.recupByUnit.map((u) => u.unit);
-  const values = data.recupByUnit.map((u) => Number(u.value ?? 0));
-  const hasData = labels.length > 0 && values.some((v) => v > 0);
-  if (!hasData) {
-    s.addText("Aucune récupération PEV saisie pour le moment.", {
+  const ant = data.antigenLabels;
+  const rows = data.recupAntigenByUnit;
+  const totals = data.recupAntigenTotals;
+  const hasData = totals.some((v) => v > 0);
+
+  if (ant.length === 0 || !hasData) {
+    s.addText("Aucune récupération PEV par antigène saisie pour ce périmètre.", {
       x: 1, y: 3.2, w: W - 2, h: 1, align: "center", fontSize: 14, italic: true, color: GREY,
     });
-  } else {
-    s.addChart(
-      pptx.ChartType.bar,
-      [{ name: "Récupérations PEV", labels, values }],
-      {
-        x: 0.5, y: 1.2, w: W - 1, h: 4.7,
-        barDir: "col", chartColors: [ACCENT], showValue: true,
-        dataLabelColor: NAVY_DEEP, dataLabelFontSize: 10,
-        catAxisLabelFontSize: 9, catAxisLabelRotate: labels.length > 8 ? 45 : 0,
-        valAxisLabelFontSize: 9, showLegend: false,
-      }
-    );
+    addCommentBar(pptx, s, `${fmtInt(data.saillants.recup)} enfants récupérés et orientés vers le PEV de routine pendant la campagne.`);
+    return;
   }
-  addCommentBar(pptx, s, `${fmtInt(data.saillants.recup)} enfants récupérés et orientés vers le PEV de routine pendant la campagne polio (co-administration).`);
+
+  // Tableau matriciel : unité (ZS) × antigène (EV).
+  const head: PptxGenJS.TableCell[] = [
+    { text: data.byUnitLabel, options: thHeader() },
+    ...ant.map((a): PptxGenJS.TableCell => ({ text: a, options: thHeader() })),
+  ];
+  const trows: PptxGenJS.TableRow[] = [
+    head,
+    ...rows.map((r): PptxGenJS.TableCell[] => [
+      { text: r.unit, options: tdCell({ bold: true }) },
+      ...r.ev.map((v): PptxGenJS.TableCell => ({ text: fmtInt(v), options: tdCell({ align: "right" }) })),
+    ]),
+    [
+      { text: "Total", options: thTotal() },
+      ...totals.map((v): PptxGenJS.TableCell => ({ text: fmtInt(v), options: thTotal({ align: "right" }) })),
+    ],
+  ];
+
+  const nCols = 1 + ant.length;
+  const colW = computeColW(W - 0.9, nCols, [1.7, ...ant.map(() => 0.75)]);
+  s.addTable(trows, {
+    x: 0.45, y: 1.25, w: W - 0.9, colW,
+    border: { type: "solid", color: "DEE5EE", pt: 0.5 },
+    rowH: 0.3, valign: "middle", fontFace: "Calibri", fontSize: 8,
+    autoPage: false,
+  });
+
+  const totalEnfants = totals.reduce((a, b) => a + b, 0);
+  addCommentBar(pptx, s, `${fmtInt(data.saillants.recup)} enfants récupérés au PEV de routine — ${fmtInt(totalEnfants)} doses d'antigènes administrées (co-administration polio + PEV).`);
+}
+
+/* ─── Slide : Surveillance des MPV par ZS ──────────────────────────────── */
+
+const MAROON = "7B2D3A";
+const MAROON_LIGHT = "F3E6E9";
+
+function buildSurveillanceMPV(ctx: SlideCtx): void {
+  const { pptx, data } = ctx;
+  const s = pptx.addSlide();
+  ctx.addHeader(s, "Surveillance des MPV par Zone de Santé", "Maladies à potentiel épidémique — recherche active des cas de MEV");
+  const t = data.survTotals;
+
+  // Cartes de synthèse (PFA / Rougeole / FJ / TNN).
+  const cards: { label: string; value: number }[] = [
+    { label: "PFA – Cas", value: t.pfa },
+    { label: "Rougeole – Cas", value: t.rougeole },
+    { label: "Fièvre Jaune – Cas", value: t.fj },
+    { label: "TNN – Cas", value: t.tnn },
+  ];
+  const cw = 2.9;
+  const gap = 0.2;
+  const startX = (W - (cards.length * cw + (cards.length - 1) * gap)) / 2;
+  cards.forEach((c, i) => {
+    const x = startX + i * (cw + gap);
+    s.addShape(pptx.ShapeType.roundRect, { x, y: 1.25, w: cw, h: 1.5, fill: { color: MAROON }, line: { color: MAROON, width: 1 }, rectRadius: 0.08 });
+    s.addText(c.label, { x, y: 1.32, w: cw, h: 0.45, align: "center", valign: "middle", color: "FFFFFF", bold: true, fontSize: 13 });
+    s.addText(fmtInt(c.value), { x, y: 1.75, w: cw, h: 0.9, align: "center", valign: "middle", color: "FFFFFF", bold: true, fontSize: 34 });
+  });
+
+  // Tableau par unité (ZS) : PFA / Rougeole / FJ / TNN.
+  const head: PptxGenJS.TableCell[] = [
+    { text: data.byUnitLabel, options: thHeader({ fill: { color: MAROON } }) },
+    { text: "PFA", options: thHeader({ fill: { color: MAROON } }) },
+    { text: "Rougeole", options: thHeader({ fill: { color: MAROON } }) },
+    { text: "Fièvre Jaune", options: thHeader({ fill: { color: MAROON } }) },
+    { text: "TNN", options: thHeader({ fill: { color: MAROON } }) },
+  ];
+  const rows = data.survByUnit
+    .filter((r) => r.pfa || r.rougeole || r.fj || r.tnn)
+    .sort((a, b) => (b.pfa + b.rougeole + b.fj + b.tnn) - (a.pfa + a.rougeole + a.fj + a.tnn));
+  const body: PptxGenJS.TableRow[] = rows.map((r): PptxGenJS.TableCell[] => [
+    { text: r.unit, options: tdCell({ bold: true }) },
+    { text: fmtInt(r.pfa), options: tdCell({ align: "right" }) },
+    { text: fmtInt(r.rougeole), options: tdCell({ align: "right" }) },
+    { text: fmtInt(r.fj), options: tdCell({ align: "right" }) },
+    { text: fmtInt(r.tnn), options: tdCell({ align: "right" }) },
+  ]);
+  const trows: PptxGenJS.TableRow[] = [
+    head,
+    ...body,
+    [
+      { text: "Total", options: thTotal({ fill: { color: MAROON } }) },
+      { text: fmtInt(t.pfa), options: thTotal({ align: "right", fill: { color: MAROON } }) },
+      { text: fmtInt(t.rougeole), options: thTotal({ align: "right", fill: { color: MAROON } }) },
+      { text: fmtInt(t.fj), options: thTotal({ align: "right", fill: { color: MAROON } }) },
+      { text: fmtInt(t.tnn), options: thTotal({ align: "right", fill: { color: MAROON } }) },
+    ],
+  ];
+  s.addShape(pptx.ShapeType.roundRect, { x: 2.4, y: 3.0, w: W - 4.8, h: 0.02, fill: { color: MAROON_LIGHT } });
+  s.addTable(trows, {
+    x: 3.0, y: 3.1, w: W - 6.0, colW: computeColW(W - 6.0, 5, [1.8, 1, 1.2, 1.2, 1]),
+    border: { type: "solid", color: "E7D6DB", pt: 0.5 },
+    rowH: 0.3, valign: "middle", fontFace: "Calibri", fontSize: 9, autoPage: false,
+  });
+
+  if (rows.length === 0) {
+    s.addText("Aucun cas de MPV notifié sur ce périmètre pendant la campagne.", {
+      x: 1, y: 6.1, w: W - 2, h: 0.5, align: "center", fontSize: 12, italic: true, color: GREY,
+    });
+  }
 }
 
 /* ─── Slides 8/9 : Gestion vaccin ──────────────────────────────────────── */

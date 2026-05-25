@@ -66,11 +66,41 @@ const C = {
   // MAPI
   mapiMineures: 222,
   mapiGraves: 223,
+  // Surveillance des MPV — Recherche active des cas de MEV (bloc vaccination).
+  survPFA: 218,
+  survRougeole: 219,
+  survFJ: 220,
+  survTNN: 221,
   // Récupérations PEV de routine (co-administration)
   recup011: 258,
   recup1223: 292,
   recup2459: 326,
 } as const;
+
+/**
+ * Antigènes du « Renforcement PEV systématique » récupérés pendant la campagne.
+ * `col` = colonne EV (enfants vaccinés) de la tranche 0-11 mois. Le masque répète
+ * chaque antigène pour 0-11, 12-23 et 24-59 mois avec un pas de 34 colonnes ; le
+ * total « enfants vaccinés » somme les trois tranches d'âge.
+ */
+export const ANTIGENES: { key: string; label: string; col: number }[] = [
+  { key: "BCG", label: "BCG", col: 225 },
+  { key: "VPI1", label: "VPI 1", col: 227 },
+  { key: "DTC1", label: "DTC 1", col: 229 },
+  { key: "DTC2", label: "DTC 2", col: 231 },
+  { key: "DTC3", label: "DTC 3", col: 233 },
+  { key: "PCV1", label: "PCV 1", col: 236 },
+  { key: "PCV2", label: "PCV 2", col: 238 },
+  { key: "PCV3", label: "PCV 3", col: 240 },
+  { key: "ROTA1", label: "Rota 1", col: 243 },
+  { key: "ROTA2", label: "Rota 2", col: 245 },
+  { key: "ROTA3", label: "Rota 3", col: 247 },
+  { key: "VAR1", label: "VAR 1", col: 250 },
+  { key: "VAR2", label: "VAR 2", col: 252 },
+  { key: "VAA", label: "VAA", col: 254 },
+  { key: "VPI2", label: "VPI 2", col: 256 },
+];
+const ANTIGENE_OFFSETS = [0, 34, 68]; // tranches 0-11, 12-23, 24-59 mois
 
 export interface DailyValue {
   /** Index du jour (1-based : Jour1 = 1, Jour2 = 2, …) */
@@ -127,6 +157,13 @@ export interface ASRecord {
   recup: number;
   mapiMineures: number;
   mapiGraves: number;
+  /** Enfants vaccinés par antigène (EV), somme des tranches d'âge — ordre = ANTIGENES. */
+  antigenesEV: number[];
+  // Surveillance des MPV (cas notifiés)
+  survPFA: number;
+  survRougeole: number;
+  survFJ: number;
+  survTNN: number;
 }
 
 export interface MasqueData {
@@ -294,6 +331,13 @@ export function parseMasque(buffer: ArrayBuffer, fileName: string): MasqueData {
         num(cell(row, C.recup2459)),
       mapiMineures: num(cell(row, C.mapiMineures)),
       mapiGraves: num(cell(row, C.mapiGraves)),
+      antigenesEV: ANTIGENES.map((a) =>
+        ANTIGENE_OFFSETS.reduce((sum, off) => sum + num(cell(row, a.col + off)), 0)
+      ),
+      survPFA: num(cell(row, C.survPFA)),
+      survRougeole: num(cell(row, C.survRougeole)),
+      survFJ: num(cell(row, C.survFJ)),
+      survTNN: num(cell(row, C.survTNN)),
     });
   }
 
