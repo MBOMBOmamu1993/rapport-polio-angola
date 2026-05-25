@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 620 132" fill="none" role="img" aria-label="PEV — Programme Élargi de Vaccination, République Démocratique du Congo">
+  <!-- Badge -->
+  <rect x="6" y="14" width="104" height="104" rx="22" fill="#18479E"/>
+  <!-- Adulte + enfant (silhouettes) -->
+  <g fill="#FFFFFF">
+    <circle cx="48" cy="48" r="13"/>
+    <path d="M27 100 c0-19 9-30 21-30 c12 0 21 11 21 30 z"/>
+    <circle cx="80" cy="58" r="9"/>
+    <path d="M66 100 c0-13 6-21 14-21 c8 0 14 8 14 21 z"/>
+  </g>
+  <!-- PEV -->
+  <text x="132" y="92" font-family="Arial, Helvetica, sans-serif" font-size="70" font-weight="700" fill="#18479E" letter-spacing="1">PEV</text>
+  <!-- Séparateur -->
+  <rect x="300" y="30" width="3" height="72" fill="#2E6FD0"/>
+  <!-- Programme Élargi de Vaccination -->
+  <text x="318" y="55" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="600" fill="#18479E">Programme</text>
+  <text x="318" y="82" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="600" fill="#18479E">Élargi de</text>
+  <text x="318" y="109" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="600" fill="#18479E">Vaccination</text>
+  <!-- Séparateur -->
+  <rect x="468" y="30" width="3" height="72" fill="#2E6FD0"/>
+  <!-- République Démocratique du Congo -->
+  <text x="486" y="55" font-family="Arial, Helvetica, sans-serif" font-size="19" fill="#18479E">République</text>
+  <text x="486" y="81" font-family="Arial, Helvetica, sans-serif" font-size="19" fill="#18479E">Démocratique</text>
+  <text x="486" y="107" font-family="Arial, Helvetica, sans-serif" font-size="19" fill="#18479E">du Congo</text>
+</svg>

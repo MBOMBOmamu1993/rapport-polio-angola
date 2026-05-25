@@ -138,6 +138,31 @@ async function toDataUrl(path: string): Promise<string | null> {
   }
 }
 
+/** Rasterise un SVG (fond transparent) en PNG data URL pour l'insertion dans le PPTX. */
+async function svgToPngData(path: string, w: number, h: number): Promise<string | null> {
+  try {
+    const res = await fetch(path);
+    if (!res.ok) return null;
+    const svg = await res.text();
+    return await new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return resolve(null);
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/png"));
+      };
+      img.onerror = () => resolve(null);
+      img.src = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(svg)));
+    });
+  } catch {
+    return null;
+  }
+}
+
 function fmtPct(n: number | null, d = 2): string {
   if (n === null || !Number.isFinite(n)) return "—";
   return `${n.toFixed(d).replace(".", ",")} %`;
@@ -178,7 +203,7 @@ export async function exportReportPPT(data: ReportData): Promise<void> {
 
   const [cover, pev] = await Promise.all([
     toDataUrl("/cover-polio.png"),
-    toDataUrl("/logo/pev-transparent.png"),
+    svgToPngData("/logo/pev-logo-white.svg", 930, 198),
   ]);
 
   const ctx: SlideCtx = { pptx, data, pev, addHeader: addHeaderFactory(pptx, data, pev) };
@@ -231,7 +256,7 @@ function addHeaderFactory(
         fontSize: 11, color: "CCE4FF", align: "left", italic: true, fontFace: "Calibri",
       });
     }
-    if (pev) s.addImage({ data: pev, x: W - 1.05, y: 0.13, w: 0.7, h: 0.7 });
+    if (pev) s.addImage({ data: pev, x: W - 2.25, y: 0.26, w: 2.0, h: 0.43 });
 
     // Pied de page.
     s.addText("Campagne de vaccination polio synchronisée avec l'Angola — nVPO2 & VPOb (co-administration)", {
@@ -258,8 +283,8 @@ function buildCover(ctx: SlideCtx, cover: string | null): void {
   s.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: W * 0.46, h: H, fill: { color: NAVY_DEEP } });
   s.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 0.16, h: H, fill: { color: ACCENT } });
 
-  // Logo PEV (sans fond).
-  if (pev) s.addImage({ data: pev, x: 0.6, y: 0.5, w: 1.2, h: 1.2 });
+  // Logo PEV (sans fond) — lockup horizontal.
+  if (pev) s.addImage({ data: pev, x: 0.6, y: 0.55, w: 3.5, h: 0.745 });
 
   // Eyebrow.
   s.addText("RAPPORT DES RÉSULTATS", {
@@ -839,7 +864,7 @@ function buildMerci(ctx: SlideCtx): void {
     x: 0, y: H / 2 - 1.0, w: W, h: 2.0,
     align: "center", valign: "middle", fontSize: 38, bold: true, color: "FFFFFF", charSpacing: 4,
   });
-  if (pev) s.addImage({ data: pev, x: W / 2 - 0.55, y: H / 2 + 1.4, w: 1.1, h: 1.1 });
+  if (pev) s.addImage({ data: pev, x: W / 2 - 1.65, y: H / 2 + 1.45, w: 3.3, h: 0.703 });
 }
 
 /* ─── Sous-helpers tableau / cellules / commentaires ───────────────────── */
