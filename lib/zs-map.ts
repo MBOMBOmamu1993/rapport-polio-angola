@@ -1,6 +1,7 @@
 /**
- * Rendu d'une carte choroplèthe des Zones de Santé de la RDC, colorée par la
- * complétude (ou un autre indicateur) — reproduit la « spatialisation » du modèle.
+ * Rendu d'une carte de localisation des Zones de Santé de la RDC : les ZS
+ * couvertes par le périmètre sélectionné sont surlignées (jaune) sur le fond
+ * national, à la manière de la carte « locator » du modèle officiel.
  *
  * Le rendu est entièrement côté navigateur : on récupère le TopoJSON, on le
  * projette en SVG (d3-geo), puis on convertit le SVG en PNG (data URL) pour
@@ -16,7 +17,9 @@ import type { Feature, FeatureCollection, Geometry } from "geojson";
 const TOPOJSON_URL =
   "https://gist.githubusercontent.com/MBOMBOmamu1993/1297c206c046ee018d5ed6c392d6c20f/raw/24ce95b2935d2b4cc4ef71701138218ca870ff01/rdc_zs.topojson";
 
-const NO_DATA = "E2E8F0";
+const HILITE = "#F4E03A";   // zone(s) couverte(s)
+const BASE_FILL = "#F1F5F9"; // reste du territoire
+const STROKE = "#64748B";
 
 export function normalizeZS(name: string): string {
   return (name || "")
@@ -26,14 +29,6 @@ export function normalizeZS(name: string): string {
     .toUpperCase()
     .replace(/ZONE DE SANTE/g, "")
     .replace(/[^A-Z0-9]/g, "");
-}
-
-function colorForCompletude(v: number | undefined): string {
-  if (v == null || !Number.isFinite(v)) return NO_DATA;
-  if (v > 100) return "#1D4ED8"; // > 100 % — bleu
-  if (v >= 95) return "#22B457"; // 95–100 % — vert
-  if (v >= 80) return "#F1C40F"; // 80–95 % — jaune
-  return "#E23636";              // < 80 % — rouge
 }
 
 /** Détecte la propriété portant le nom de la ZS dans les features du TopoJSON. */
@@ -80,10 +75,10 @@ function svgToPng(svg: string, width: number, height: number): Promise<string | 
 }
 
 /**
- * @param completudeByZS clé = nom de ZS normalisé (via normalizeZS), valeur = % complétude.
+ * @param highlightZS ensemble de noms de ZS normalisés (via normalizeZS) à surligner.
  * @returns data URL PNG, ou null si la carte ne peut pas être produite.
  */
-export async function renderZSMap(completudeByZS: Map<string, number>): Promise<string | null> {
+export async function renderZSMap(highlightZS: Set<string>): Promise<string | null> {
   try {
     const res = await fetch(TOPOJSON_URL, { cache: "force-cache" });
     if (!res.ok) return null;
@@ -94,27 +89,32 @@ export async function renderZSMap(completudeByZS: Map<string, number>): Promise<
     const fc = feature(topo, topo.objects[objName] as GeometryCollection) as FeatureCollection<Geometry>;
     if (!fc.features?.length) return null;
 
-    const nameKey = detectNameKey(fc.features, new Set(completudeByZS.keys()));
+    const nameKey = detectNameKey(fc.features, highlightZS);
 
     const width = 1100;
     const height = 1000;
     const projection = geoMercator().fitSize([width, height], fc);
     const path = geoPath(projection);
 
-    const paths = fc.features
-      .map((f) => {
-        const d = path(f);
-        if (!d) return "";
-        const rawName = nameKey ? (f.properties?.[nameKey] as string | undefined) : undefined;
-        const v = rawName ? completudeByZS.get(normalizeZS(rawName)) : undefined;
-        const fill = colorForCompletude(v);
-        return `<path d="${d}" fill="${fill}" stroke="#FFFFFF" stroke-width="0.7"/>`;
-      })
-      .join("");
+    // On dessine d'abord les ZS de fond, puis les ZS surlignées par-dessus pour
+    // que leur contour reste net.
+    const base: string[] = [];
+    const hi: string[] = [];
+    for (const f of fc.features) {
+      const d = path(f);
+      if (!d) continue;
+      const rawName = nameKey ? (f.properties?.[nameKey] as string | undefined) : undefined;
+      const on = rawName ? highlightZS.has(normalizeZS(rawName)) : false;
+      if (on) {
+        hi.push(`<path d="${d}" fill="${HILITE}" stroke="${STROKE}" stroke-width="1.1"/>`);
+      } else {
+        base.push(`<path d="${d}" fill="${BASE_FILL}" stroke="${STROKE}" stroke-width="0.6"/>`);
+      }
+    }
 
     const svg =
       `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">` +
-      `<rect width="${width}" height="${height}" fill="#FFFFFF"/>${paths}</svg>`;
+      `<rect width="${width}" height="${height}" fill="#FFFFFF"/>${base.join("")}${hi.join("")}</svg>`;
 
     return await svgToPng(svg, width, height);
   } catch {

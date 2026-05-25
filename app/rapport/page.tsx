@@ -12,45 +12,127 @@ import {
   vpobGestion,
   resolveDrillLevel,
   scopeLabel,
+  tauxPerte,
   totals,
+  NVPO2_DOSES_PAR_FLACON,
+  VPOB_DOSES_PAR_FLACON,
+  type UnitAgg,
+  type Totals,
 } from "@/lib/analytics";
 import { fmtInt, fmtPct } from "@/lib/format";
 import { fetchNational } from "@/lib/national";
 import { ANTIGENES, type MasqueData } from "@/lib/parse-masque";
 import type { CompletudeRow, ProblemeRow, ReportData } from "@/lib/export-report-pptx";
 
-const DEFAULT_PROBLEMES: ProblemeRow[] = [
-  {
-    probleme: "Écart entre données de vaccination nVPO2 et VPOb",
-    causes: "Différents flacons reçus le matin dans les sites de stockage",
-    zs: "—",
-    solutions: "Concorder les doses lors de la transmission des vaccins aux équipes",
-  },
-  {
-    probleme: "Faible remontée des données dans les ZS sans réseau Internet",
-    causes: "Perturbation de la connectivité, faible rendement des collecteurs",
-    zs: "—",
-    solutions: "Traquer les collecteurs pour la transmission des données aux BCZ",
-  },
-  {
-    probleme: "Perturbation de l'horaire de travail",
-    causes: "Pluies",
-    zs: "—",
-    solutions: "Reprendre les activités après la pluie",
-  },
-  {
-    probleme: "Taux de perte hors seuil (nVPO2 / VPOb)",
-    causes: "Saisie irrégulière des flacons utilisés",
-    zs: "—",
-    solutions: "Revoir la saisie des flacons utilisés dans l'outil de collecte",
-  },
-];
+/** Concatène une liste de ZS en limitant la longueur affichée. */
+function joinUnits(names: string[], max = 8): string {
+  if (names.length === 0) return "—";
+  if (names.length <= max) return names.join(", ");
+  return `${names.slice(0, max).join(", ")} … (+${names.length - max})`;
+}
+
+/**
+ * Déduit les problèmes rencontrés directement des analyses, par unité (ZS le plus
+ * souvent). Chaque problème liste les unités réellement concernées et propose une
+ * piste de solution cohérente avec l'anomalie détectée.
+ */
+function computeProblemes(byUnit: UnitAgg[], t: Totals): ProblemeRow[] {
+  const out: ProblemeRow[] = [];
+  const NV_SEUIL = 11; // seuil de perte nVPO2 (%)
+  const VP_SEUIL = 10; // seuil de perte VPOb (%)
+
+  // 1. Complétude des rapports insuffisante (< 95 %).
+  const complBas = byUnit
+    .filter((u) => u.vaccAttendus > 0 && (u.vaccRecus / u.vaccAttendus) * 100 < 95)
+    .sort((a, b) => a.vaccRecus / a.vaccAttendus - b.vaccRecus / b.vaccAttendus)
+    .map((u) => u.unit);
+  if (complBas.length > 0) {
+    out.push({
+      probleme: "Complétude des rapports insuffisante (< 95 %)",
+      causes: "Faible remontée des données : zones sans réseau Internet, retard de transmission des collecteurs",
+      zs: joinUnits(complBas),
+      solutions: "Tracer les collecteurs et BCZ retardataires, sécuriser la transmission (relais radio/moto), valider les rapports manquants au J+1",
+    });
+  }
+
+  // 2. Couverture nVPO2 sous l'objectif (< 95 %).
+  const nvBas = byUnit
+    .filter((u) => u.nvpo2Cible > 0 && (u.nvpo2Vacc / u.nvpo2Cible) * 100 < 95)
+    .sort((a, b) => a.nvpo2Vacc / a.nvpo2Cible - b.nvpo2Vacc / b.nvpo2Cible)
+    .map((u) => u.unit);
+  if (nvBas.length > 0) {
+    out.push({
+      probleme: "Couverture vaccinale nVPO2 sous l'objectif (< 95 %)",
+      causes: "Enfants absents/non atteints, refus, sites difficiles d'accès, démarrage tardif des équipes",
+      zs: joinUnits(nvBas),
+      solutions: "Organiser des passages de ratissage ciblés, renforcer la mobilisation sociale et le porte-à-porte dans les aires faibles",
+    });
+  }
+
+  // 3. Couverture VPOb sous l'objectif (< 95 %).
+  const vpBas = byUnit
+    .filter((u) => u.vpobCible > 0 && (u.vpobVacc / u.vpobCible) * 100 < 95)
+    .sort((a, b) => a.vpobVacc / a.vpobCible - b.vpobVacc / b.vpobCible)
+    .map((u) => u.unit);
+  if (vpBas.length > 0) {
+    out.push({
+      probleme: "Couverture vaccinale VPOb sous l'objectif (< 95 %)",
+      causes: "Co-administration incomplète, ruptures ponctuelles de VPOb, enfants déjà partis",
+      zs: joinUnits(vpBas),
+      solutions: "Assurer la co-administration systématique nVPO2 + VPOb, réapprovisionner les sites et planifier le rattrapage",
+    });
+  }
+
+  // 4. Taux de perte nVPO2 hors seuil (> 11 % ou négatif).
+  const nvPerte = byUnit
+    .filter((u) => {
+      const x = tauxPerte(u.nvpo2Vacc, u.nvpo2FlaconsUtil, NVPO2_DOSES_PAR_FLACON);
+      return x != null && (x > NV_SEUIL || x < 0);
+    })
+    .map((u) => u.unit);
+  if (nvPerte.length > 0) {
+    out.push({
+      probleme: `Taux de perte nVPO2 hors seuil (> ${NV_SEUIL} % ou négatif)`,
+      causes: "Saisie irrégulière des flacons utilisés/rendus, rupture de chaîne du froid, flacons entamés non terminés",
+      zs: joinUnits(nvPerte),
+      solutions: "Reprendre la saisie flacons reçus/utilisés/rendus, renforcer la gestion de la chaîne du froid et la politique des flacons entamés",
+    });
+  }
+
+  // 5. Taux de perte VPOb hors seuil (> 10 % ou négatif).
+  const vpPerte = byUnit
+    .filter((u) => {
+      const x = tauxPerte(u.vpobVacc, u.vpobFlaconsUtil, VPOB_DOSES_PAR_FLACON);
+      return x != null && (x > VP_SEUIL || x < 0);
+    })
+    .map((u) => u.unit);
+  if (vpPerte.length > 0) {
+    out.push({
+      probleme: `Taux de perte VPOb hors seuil (> ${VP_SEUIL} % ou négatif)`,
+      causes: "Saisie irrégulière des flacons, flacons multidoses partiellement utilisés, conservation inadéquate",
+      zs: joinUnits(vpPerte),
+      solutions: "Fiabiliser la saisie des flacons VPOb, respecter la durée d'utilisation après ouverture et la chaîne du froid",
+    });
+  }
+
+  // 6. MAPI graves notifiées.
+  if (t.mapiGraves > 0) {
+    out.push({
+      probleme: `MAPI graves notifiées (${t.mapiGraves})`,
+      causes: "Manifestations indésirables post-immunisation requérant investigation",
+      zs: "Voir slide Surveillance des MAPI",
+      solutions: "Investiguer chaque cas sous 48 h, notifier au niveau supérieur, assurer la prise en charge médicale et la communication de crise",
+    });
+  }
+
+  return out;
+}
 
 export default function RapportPage() {
   const { data: localData, filters, setFilter, resetFilters } = useApp();
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
-  const [problemes, setProblemes] = useState<ProblemeRow[]>(DEFAULT_PROBLEMES);
+  const [problemes, setProblemes] = useState<ProblemeRow[]>([]);
   const [nationalData, setNationalData] = useState<MasqueData | null>(null);
   const [nationalLoaded, setNationalLoaded] = useState(false);
   const [source, setSource] = useState<"local" | "national">("local");
@@ -76,6 +158,13 @@ export default function RapportPage() {
   const t = useMemo(() => totals(filtered), [filtered]);
   const byUnit = useMemo(() => aggregateByUnit(filtered, drill.level), [filtered, drill.level]);
 
+  // Problèmes déduits automatiquement des analyses (recalculés à chaque changement
+  // de périmètre). L'utilisateur peut ensuite les ajuster manuellement.
+  const autoProblemes = useMemo(() => computeProblemes(byUnit, t), [byUnit, t]);
+  useEffect(() => {
+    setProblemes(autoProblemes);
+  }, [autoProblemes]);
+
   if (!data) {
     return (
       <div className="rounded-2xl border border-surface-200 bg-white p-10 text-center shadow-card">
@@ -92,6 +181,25 @@ export default function RapportPage() {
   function buildReport(): ReportData {
     const nbJours = data!.meta.nbJours;
     const jourLabels = data!.meta.jourLabels;
+
+    // Entité de plus bas niveau filtrée (page de garde) — dynamique.
+    const coverEntity =
+      filters.as ? `Aire de Santé : ${filters.as}` :
+      filters.zs ? `Zone de Santé : ${filters.zs}` :
+      filters.antenne ? `Antenne : ${filters.antenne}` :
+      filters.province ? `Province : ${filters.province}` :
+      `Province : ${data!.meta.province}`;
+
+    // Période dynamique : du premier au dernier jour de campagne saisi.
+    const shortJ = (l: string) => l.replace(/jour\s*/i, "J").trim();
+    const periodeJours =
+      jourLabels.length > 0
+        ? `Du ${shortJ(jourLabels[0])} au ${shortJ(jourLabels[jourLabels.length - 1])}`
+        : "";
+    const periode =
+      periodeJours && data!.meta.periode
+        ? `${periodeJours} — ${data!.meta.periode}`
+        : periodeJours || data!.meta.periode;
 
     // Construction du tableau complétude par jour pour chaque unité.
     const completudeByUnit: CompletudeRow[] = byUnit.map((a) => {
@@ -116,7 +224,8 @@ export default function RapportPage() {
 
     return {
       province: filters.province ?? data!.meta.province,
-      periode: data!.meta.periode,
+      coverEntity,
+      periode,
       dateLabel: new Date().toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" }),
       scopeLabel: scopeLabel(filters),
       byUnitLabel: drill.label,
@@ -168,20 +277,15 @@ export default function RapportPage() {
       const report = buildReport();
       try {
         const { renderZSMap, normalizeZS } = await import("@/lib/zs-map");
-        const byZS = new Map<string, { att: number; rec: number }>();
+        // Carte de localisation : on surligne les ZS du périmètre sélectionné.
+        const highlight = new Set<string>();
         for (const r of filtered) {
           const k = normalizeZS(r.zs);
-          if (!k) continue;
-          const acc = byZS.get(k) ?? { att: 0, rec: 0 };
-          acc.att += r.vaccAttendus;
-          acc.rec += r.vaccRecus;
-          byZS.set(k, acc);
+          if (k) highlight.add(k);
         }
-        const completudeByZS = new Map<string, number>();
-        for (const [k, v] of byZS) if (v.att > 0) completudeByZS.set(k, (v.rec / v.att) * 100);
-        report.completudeMapPng = completudeByZS.size > 0 ? await renderZSMap(completudeByZS) : null;
+        report.scopeMapPng = highlight.size > 0 ? await renderZSMap(highlight) : null;
       } catch {
-        report.completudeMapPng = null;
+        report.scopeMapPng = null;
       }
       const { exportReportPPT } = await import("@/lib/export-report-pptx");
       await exportReportPPT(report);
