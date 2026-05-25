@@ -52,10 +52,11 @@ export function applyFilters(data: MasqueData, f: Filters): ASRecord[] {
 export type DrillLevel = "province" | "antenne" | "zs" | "as";
 
 export function resolveDrillLevel(f: Filters): { level: DrillLevel; label: string } {
+  // ZS filtrée → on détaille ses Aires de Santé.
   if (f.zs) return { level: "as", label: "Aire de Santé" };
-  if (f.antenne) return { level: "zs", label: "Zone de Santé" };
-  if (f.province) return { level: "zs", label: "Zone de Santé" };
-  return { level: "province", label: "Province" };
+  // Province / Antenne filtrée, ou aucun filtre (par défaut) → on liste les
+  // Zones de Santé du périmètre (et non plus les antennes ou provinces).
+  return { level: "zs", label: "Zone de Santé" };
 }
 
 export function scopeLabel(f: Filters): string {
