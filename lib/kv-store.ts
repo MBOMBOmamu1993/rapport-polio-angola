@@ -95,6 +95,8 @@ export async function readNational(): Promise<{
       importedAt: latest || new Date().toISOString(),
       fileName: "Compilation nationale",
       nbAires: records.length,
+      nbJours: Math.max(0, ...records.map((r) => r.nvpo2Daily?.length ?? 0)),
+      jourLabels: maxJourLabels(blocks),
     },
     records,
   };
@@ -122,5 +124,16 @@ function mostCommon(arr: string[]): string {
   let best = "";
   let max = -1;
   for (const [k, n] of c) if (n > max) { max = n; best = k; }
+  return best;
+}
+
+/** Récupère les étiquettes de jour les plus longues parmi les blocs (pour la compilation nationale). */
+function maxJourLabels(blocks: ZSBlock[]): string[] {
+  let best: string[] = [];
+  for (const b of blocks) {
+    const first = b.records[0];
+    const labels = first?.nvpo2Daily?.map((d) => d.label) ?? [];
+    if (labels.length > best.length) best = labels;
+  }
   return best;
 }

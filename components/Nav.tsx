@@ -13,14 +13,18 @@ const links = [
 export function Nav() {
   const pathname = usePathname();
   return (
-    <header className="sticky top-0 z-30 border-b border-surface-200 bg-white/90 backdrop-blur">
-      <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-2.5 md:px-6">
-        <Image src="/logo/pev.png" alt="PEV" width={40} height={40} className="h-10 w-10 object-contain" priority />
+    <header className="sticky top-0 z-30 navy-bar shadow-navy">
+      <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3 md:px-6">
+        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white/95 p-1.5 ring-2 ring-white/30">
+          <Image src="/logo/pev.png" alt="PEV" width={40} height={40} className="h-10 w-10 object-contain" priority />
+        </div>
         <div className="mr-auto leading-tight">
-          <div className="text-sm font-bold text-oms-800 md:text-base">
+          <div className="text-sm font-bold text-white md:text-base">
             Campagne polio synchronisée avec l&apos;Angola
           </div>
-          <div className="text-[11px] text-surface-500">Programme Élargi de Vaccination — RD Congo</div>
+          <div className="text-[11px] text-accent-100/80 md:text-xs">
+            Programme Élargi de Vaccination — RD Congo · nVPO2 &amp; VPOb
+          </div>
         </div>
         <nav className="flex gap-1.5">
           {links.map((l) => {
@@ -31,7 +35,9 @@ export function Nav() {
                 href={l.href}
                 className={clsx(
                   "rounded-lg px-3 py-2 text-xs font-semibold transition md:text-sm",
-                  active ? "bg-oms-500 text-white" : "text-oms-700 hover:bg-oms-50"
+                  active
+                    ? "bg-white text-navy-700 shadow-md"
+                    : "text-white/85 hover:bg-white/10 hover:text-white"
                 )}
               >
                 <span className="mr-1">{l.icon}</span>
