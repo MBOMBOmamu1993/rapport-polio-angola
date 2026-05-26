@@ -7,7 +7,7 @@ import { useApp } from "@/lib/store";
 import { parseMasque } from "@/lib/parse-masque";
 import { totals } from "@/lib/analytics";
 import { fmtInt, fmtPct } from "@/lib/format";
-import { fetchNational, pushImport, type EntityInfo } from "@/lib/national";
+import { fetchNational, pushImport, resetNational, type EntityInfo } from "@/lib/national";
 
 export default function ImportPage() {
   const { data, setData, clearData } = useApp();
@@ -176,7 +176,104 @@ export default function ImportPage() {
       )}
 
       <NationalPanel entities={entities} />
+
+      {entities !== null && <AdminReset onDone={refreshEntities} />}
     </div>
+  );
+}
+
+function AdminReset({ onDone }: { onDone: () => Promise<void> | void }) {
+  const [open, setOpen] = useState(false);
+  const [code, setCode] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+
+  const phrase = "REINITIALISER";
+  const ready = code.trim().length > 0 && confirm.trim().toUpperCase() === phrase;
+
+  async function run() {
+    if (!ready || busy) return;
+    setBusy(true);
+    setMsg(null);
+    const r = await resetNational(code.trim());
+    setBusy(false);
+    if (r.ok) {
+      setMsg({ kind: "ok", text: `Compilation nationale réinitialisée — ${r.deleted ?? 0} zone(s) de santé supprimée(s). Chaque province peut réimporter à zéro.` });
+      setCode("");
+      setConfirm("");
+      await onDone();
+    } else {
+      const text =
+        r.reason === "bad_code" ? "Code administrateur incorrect." :
+        r.reason === "admin_not_configured" ? "Réinitialisation non configurée : définissez la variable d'environnement ADMIN_RESET_CODE chez l'hébergeur (Vercel), puis réessayez." :
+        r.reason === "kv_unavailable" ? "Stockage national indisponible." :
+        `Échec de la réinitialisation${r.reason ? ` (${r.reason})` : ""}.`;
+      setMsg({ kind: "err", text });
+    }
+  }
+
+  return (
+    <section className="rounded-2xl border border-danger-100 bg-danger-50/40 p-4 shadow-card">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between text-left"
+      >
+        <span className="text-sm font-bold text-danger-600">🔒 Zone administrateur — réinitialiser la compilation nationale</span>
+        <span className="text-surface-400">{open ? "▴" : "▾"}</span>
+      </button>
+
+      {open && (
+        <div className="mt-4 space-y-3">
+          <p className="text-xs text-surface-600">
+            Cette action <strong>supprime définitivement</strong> tous les imports de toutes les provinces
+            au niveau national. Chacun devra réimporter son masque à zéro. Les imports locaux sur les
+            postes ne sont pas affectés.
+          </p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-surface-400">Code administrateur</span>
+              <input
+                type="password"
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                placeholder="Code secret"
+                className="w-full rounded-lg border border-surface-300 px-3 py-2.5 text-sm text-navy-700 focus:border-danger-400 focus:outline-none focus:ring-2 focus:ring-danger-100"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-surface-400">Tapez « {phrase} » pour confirmer</span>
+              <input
+                value={confirm}
+                onChange={(e) => setConfirm(e.target.value)}
+                placeholder={phrase}
+                className="w-full rounded-lg border border-surface-300 px-3 py-2.5 text-sm text-navy-700 focus:border-danger-400 focus:outline-none focus:ring-2 focus:ring-danger-100"
+              />
+            </label>
+          </div>
+          <button
+            onClick={run}
+            disabled={!ready || busy}
+            className="inline-flex items-center gap-2 rounded-xl bg-danger-500 px-5 py-2.5 text-sm font-semibold text-white shadow-card transition hover:bg-danger-600 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {busy ? (
+              <>
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                Réinitialisation…
+              </>
+            ) : (
+              <>🗑️ Tout réinitialiser au niveau national</>
+            )}
+          </button>
+          {msg && (
+            <p className={`text-xs font-medium ${msg.kind === "ok" ? "text-good-600" : "text-danger-600"}`}>
+              {msg.text}
+            </p>
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 

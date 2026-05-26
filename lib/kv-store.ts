@@ -94,6 +94,21 @@ export async function readNationalBlocks(): Promise<ZSBlock[]> {
   return values.filter((v): v is ZSBlock => Boolean(v && v.records));
 }
 
+/**
+ * Réinitialise toute la compilation nationale : supprime chaque bloc ZS et
+ * l'index. Action d'administration destructive (tous les imports de toutes les
+ * provinces sont effacés et chacun devra réimporter à zéro).
+ */
+export async function resetNational(): Promise<{ deleted: number }> {
+  const kv = kvClient();
+  const keys = await kv.smembers(INDEX_KEY);
+  if (keys && keys.length > 0) {
+    await kv.del(...(keys as [string, ...string[]]));
+  }
+  await kv.del(INDEX_KEY);
+  return { deleted: keys?.length ?? 0 };
+}
+
 /** Construit un MasqueData consolidé (toutes provinces) + la liste des entités importées. */
 export async function readNational(): Promise<{
   data: MasqueData;

@@ -100,6 +100,22 @@ chaque import reste disponible dans le navigateur qui l'a importé.
 
 - `POST /api/import` — enregistre un import (corps = données parsées du masque).
 - `GET /api/national` — renvoie la compilation consolidée + la liste des entités.
+- `DELETE /api/national` — réinitialise toute la compilation nationale (action admin).
+
+### Réinitialisation administrateur
+
+Un bouton **« Zone administrateur »** en bas de la page Import permet d'effacer
+toute la compilation nationale (tous les imports de toutes les provinces) pour
+repartir à zéro. L'action est protégée :
+
+1. Définir une variable d'environnement `ADMIN_RESET_CODE` (un code secret de
+   votre choix) dans Vercel → Settings → Environment Variables, puis **Redeploy**.
+2. Dans l'application : déplier la zone admin, saisir ce code, taper
+   `REINITIALISER` pour confirmer, puis valider.
+
+Sans la variable `ADMIN_RESET_CODE`, l'endpoint refuse l'action : la
+réinitialisation n'est jamais ouverte par défaut. Les imports locaux des
+navigateurs ne sont pas affectés.
 
 ## Codes couleur (seuils officiels)
 

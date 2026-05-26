@@ -31,6 +31,25 @@ export async function pushImport(data: MasqueData): Promise<{ ok: boolean; reaso
   }
 }
 
+/**
+ * Réinitialise la compilation nationale (action admin). Le code secret est
+ * vérifié côté serveur contre la variable d'environnement `ADMIN_RESET_CODE`.
+ */
+export async function resetNational(
+  code: string
+): Promise<{ ok: boolean; deleted?: number; reason?: string }> {
+  try {
+    const res = await fetch("/api/national", {
+      method: "DELETE",
+      headers: { "content-type": "application/json", "x-admin-code": code },
+    });
+    const json = await res.json().catch(() => ({}));
+    return { ok: res.ok && json.ok === true, deleted: json.deleted, reason: json.reason };
+  } catch (e) {
+    return { ok: false, reason: e instanceof Error ? e.message : "network" };
+  }
+}
+
 /** Récupère la compilation nationale. Retourne null si le stockage n'est pas configuré. */
 export async function fetchNational(): Promise<NationalResult | null> {
   try {
