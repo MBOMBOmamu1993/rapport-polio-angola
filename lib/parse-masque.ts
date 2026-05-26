@@ -266,6 +266,70 @@ export function isRecapRow(province: string, antenne: string, zs: string, as: st
   return false;
 }
 
+/**
+ * Nettoie une liste d'Aires de Santé des lignes d'agrégat/sous-total qui s'y sont
+ * glissées et qui faussaient les calculs (double comptage). Deux détections
+ * complémentaires et indépendantes du libellé exact :
+ *
+ *  1. Récapitulatif par libellé (`isRecapRow`) — préfixe parent ou Antenne =
+ *     Province.
+ *  2. Détection numérique : une ligne dont les effectifs égalent la somme d'au
+ *     moins deux voisines partageant le même parent est, par construction, un
+ *     sous-total ; l'inclure double les totaux. On exige une concordance sur
+ *     plusieurs indicateurs indépendants (rapports attendus, cible, vaccinés
+ *     nVPO2 et VPOb) afin qu'aucune Aire de Santé réelle — même un chef-lieu
+ *     homonyme de sa zone — ne soit écartée par coïncidence.
+ *
+ * La détection numérique fonctionne même si le sous-total n'a aucun préfixe
+ * reconnaissable : c'est le garde-fou contre les anomalies non anticipées.
+ */
+export function sanitizeRecords(records: ASRecord[]): ASRecord[] {
+  const kept = records.filter((r) => !isRecapRow(r.province, r.antenne, r.zs, r.as));
+
+  const metricsOf = (r: ASRecord): number[] => [
+    r.vaccAttendus,
+    r.nvpo2CibleExtrap,
+    r.nvpo2Vacc,
+    r.vpobVacc,
+  ];
+  const approxEq = (a: number, b: number): boolean =>
+    Math.abs(a - b) <= Math.max(1, Math.abs(b) * 0.001);
+
+  const removed = new Set<ASRecord>();
+  const detectSubtotals = (groupKey: (r: ASRecord) => string): void => {
+    const groups = new Map<string, ASRecord[]>();
+    for (const r of kept) {
+      if (removed.has(r)) continue;
+      const k = groupKey(r);
+      const g = groups.get(k);
+      if (g) g.push(r);
+      else groups.set(k, [r]);
+    }
+    for (const group of groups.values()) {
+      // Besoin d'au moins un candidat sous-total et deux enfants réels.
+      if (group.length < 3) continue;
+      for (const cand of group) {
+        if (removed.has(cand)) continue;
+        const others = group.filter((x) => x !== cand && !removed.has(x));
+        if (others.length < 2) continue;
+        const m = metricsOf(cand);
+        const sums = m.map((_, i) => others.reduce((acc, x) => acc + metricsOf(x)[i], 0));
+        const nonTrivial = m.some((v, i) => v > 0 && sums[i] > 0);
+        const allMatch = m.every((v, i) => approxEq(v, sums[i]));
+        if (nonTrivial && allMatch) removed.add(cand);
+      }
+    }
+  };
+
+  // Du parent le plus haut au plus bas : antenne (résume ses ZS), province
+  // (résume ses antennes), zone (résume ses AS).
+  detectSubtotals((r) => `${normLabel(r.province)}||${normLabel(r.antenne)}`);
+  detectSubtotals((r) => normLabel(r.province));
+  detectSubtotals((r) => `${normLabel(r.province)}||${normLabel(r.antenne)}||${normLabel(r.zs)}`);
+
+  return kept.filter((r) => !removed.has(r));
+}
+
 /** Clé d'identification d'une Aire de Santé (insensible casse / accents / ponctuation). */
 function asKey(province: string, zs: string, as: string): string {
   const norm = (s: string) =>
@@ -421,6 +485,10 @@ export function parseMasque(buffer: ArrayBuffer, fileName: string): MasqueData {
     );
   }
 
+  // Écarte les sous-totaux résiduels (y compris ceux sans préfixe reconnaissable)
+  // détectés par concordance numérique, pour ne jamais doubler les totaux.
+  const cleanRecords = sanitizeRecords(records);
+
   // ── 3. Méta-données du classeur ──────────────────────────────────────────
   let periode = "";
   let pays = "RD CONGO";
@@ -434,9 +502,9 @@ export function parseMasque(buffer: ArrayBuffer, fileName: string): MasqueData {
     if (paysVal) pays = paysVal;
   }
 
-  const province = mostCommon(records.map((r) => r.province));
-  const antennes = unique(records.map((r) => r.antenne).filter(Boolean));
-  const zones = unique(records.map((r) => r.zs).filter(Boolean));
+  const province = mostCommon(cleanRecords.map((r) => r.province));
+  const antennes = unique(cleanRecords.map((r) => r.antenne).filter(Boolean));
+  const zones = unique(cleanRecords.map((r) => r.zs).filter(Boolean));
   const jourLabels = jourSheets.map((j) => j.label);
 
   return {
@@ -448,11 +516,11 @@ export function parseMasque(buffer: ArrayBuffer, fileName: string): MasqueData {
       zones,
       importedAt: new Date().toISOString(),
       fileName,
-      nbAires: records.length,
+      nbAires: cleanRecords.length,
       nbJours: jourSheets.length,
       jourLabels,
     },
-    records,
+    records: cleanRecords,
   };
 }
 

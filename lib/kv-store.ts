@@ -7,7 +7,7 @@
  */
 
 import { createClient, type VercelKV } from "@vercel/kv";
-import type { ASRecord, MasqueData } from "./parse-masque";
+import { sanitizeRecords, type ASRecord, type MasqueData } from "./parse-masque";
 
 const INDEX_KEY = "polio:zs:index";
 
@@ -100,7 +100,9 @@ export async function readNational(): Promise<{
   entities: { province: string; antenne: string; zs: string; importedAt: string; nbAires: number; periode: string }[];
 }> {
   const blocks = await readNationalBlocks();
-  const records: ASRecord[] = blocks.flatMap((b) => b.records);
+  // Assainit la compilation consolidée : écarte les sous-totaux/titres qui ont pu
+  // être importés avant le correctif (sinon le parent est recompté au national).
+  const records: ASRecord[] = sanitizeRecords(blocks.flatMap((b) => b.records));
 
   const provinces = uniq(records.map((r) => r.province));
   const antennes = uniq(records.map((r) => r.antenne));
