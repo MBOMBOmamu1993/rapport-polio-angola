@@ -152,6 +152,30 @@ function fmtNum(n: number): string {
   return (Math.round((n + Number.EPSILON) * 100) / 100).toLocaleString("fr-FR").replace(/\u202f/g, " ");
 }
 
+/**
+ * Nomme le niveau d'agr\u00e9gation courant au lieu du mot g\u00e9n\u00e9rique \u00ab unit\u00e9 \u00bb.
+ * `byUnitLabel` vaut \u00ab Province \u00bb, \u00ab Antenne \u00bb, \u00ab Zone de Sant\u00e9 \u00bb ou \u00ab Aire de
+ * Sant\u00e9 \u00bb ; on renvoie ce nom au singulier ou au pluriel, en minuscules, pour
+ * \u00e9crire des commentaires qui collent au tableau comment\u00e9.
+ */
+function levelWord(byUnitLabel: string, plural = false): string {
+  const l = byUnitLabel.toLowerCase().trim();
+  if (!plural) return l;
+  // Pluralise le premier mot : \u00ab zone de sant\u00e9 \u00bb \u2192 \u00ab zones de sant\u00e9 \u00bb.
+  return l.replace(/^(\S+)/, "$1s");
+}
+
+/** \u00ab 1 zone de sant\u00e9 \u00bb / \u00ab 3 zones de sant\u00e9 \u00bb avec accord du nombre. */
+function countLevel(n: number, byUnitLabel: string): string {
+  return `${n} ${levelWord(byUnitLabel, n > 1)}`;
+}
+
+/** Joint une liste de noms avec \u00ab et \u00bb avant le dernier \u00e9l\u00e9ment. */
+function joinAnd(names: string[]): string {
+  if (names.length <= 1) return names.join("");
+  return `${names.slice(0, -1).join(", ")} et ${names[names.length - 1]}`;
+}
+
 function thresholdColor(v: number | null): string {
   if (v === null || !Number.isFinite(v)) return THR_NONE;
   if (v > 100) return THR_FULL;
@@ -629,7 +653,7 @@ function buildCoverage(
       border: { type: "solid", color: "DEE5EE", pt: 0.5 },
       rowH, valign: "middle", fontFace: "Calibri",
     });
-    addCommentBar(pptx, s, coverageComment(rows, globalCV, vaccine));
+    addCommentBar(pptx, s, coverageComment(rows, globalCV, vaccine, data.byUnitLabel));
   });
 }
 
@@ -749,7 +773,7 @@ function buildSurveillanceMPV(ctx: SlideCtx): void {
 
   pages.forEach((pageRows, idx) => {
     const s = pptx.addSlide();
-    ctx.addHeader(s, `Surveillance des MPV par Zone de Santé${suiteSuffix(idx, pages.length)}`, "Maladies à potentiel épidémique — recherche active des cas de MEV");
+    ctx.addHeader(s, `Surveillance des MPV par ${data.byUnitLabel}${suiteSuffix(idx, pages.length)}`, "Maladies à potentiel épidémique — recherche active des cas de MEV");
     const tableY = idx === 0 ? 3.25 : 1.3;
     if (idx === 0) drawCards(s);
     s.addTable([head, ...pageRows], {
@@ -995,22 +1019,40 @@ function addCommentBar(pptx: PptxGenJS, s: PptxGenJS.Slide, comment: string): vo
   ], { x: 0.7, y: 6.05, w: W - 1.4, h: 0.85, valign: "middle", fontSize: 14 });
 }
 
-function coverageComment(rows: CoverageDailyRow[], globalCV: number | null, vaccine: string): string {
-  if (rows.length === 0) return `Aucune donnée de couverture ${vaccine} disponible pour ce périmètre.`;
-  const below = rows.filter((r) => r.couvGlobale != null && r.couvGlobale < 95);
-  const base = `Couverture vaccinale ${vaccine} de ${fmtPct(globalCV)} sur le périmètre sélectionné`;
-  if (below.length === 0) return `${base} : objectif ≥ 95 % atteint dans toutes les unités.`;
-  const names = below.map((r) => r.unit).slice(0, 4).join(", ");
-  const extra = below.length > 4 ? `… (${below.length} unités au total)` : "";
-  return `${base}. ${below.length} unité(s) sous le seuil de 95 % : ${names}${extra} — à renforcer par des passages de rattrapage.`;
+function coverageComment(
+  rows: CoverageDailyRow[],
+  globalCV: number | null,
+  vaccine: string,
+  byUnitLabel: string
+): string {
+  if (rows.length === 0) return `Aucune donnée de couverture ${vaccine} n'est disponible sur ce périmètre.`;
+  const niveau = levelWord(byUnitLabel);
+  const below = rows
+    .filter((r) => r.couvGlobale != null && r.couvGlobale < 95)
+    .sort((a, b) => (a.couvGlobale ?? 0) - (b.couvGlobale ?? 0));
+
+  if (below.length === 0) {
+    return `La couverture ${vaccine} atteint ${fmtPct(globalCV)} : l'objectif de 95 % est tenu dans chaque ${niveau} du périmètre. Il reste à maintenir ce niveau et à documenter les bonnes pratiques pour les prochains passages.`;
+  }
+
+  const shown = below.slice(0, 3).map((r) => `${r.unit} (${fmtPct(r.couvGlobale, 0)})`);
+  const liste = below.length > 3
+    ? `${joinAnd(shown)}, parmi ${countLevel(below.length, byUnitLabel)} concernées`
+    : joinAnd(shown);
+  const verbe = below.length > 1 ? "restent en deçà" : "reste en deçà";
+  return `Avec ${fmtPct(globalCV)}, la couverture ${vaccine} reste à consolider sur le périmètre. Les ${levelWord(byUnitLabel, true)} les plus en retard ${verbe} de l'objectif de 95 % : ${liste}. Y prévoir des passages de rattrapage (porte-à-porte et sites fixes) en priorisant les plus faibles.`;
 }
 
 function gestionComment(globalTaux: number | null, vaccine: string, seuil: number): string {
-  if (globalTaux == null) return `Données de gestion du vaccin ${vaccine} non disponibles pour ce périmètre.`;
-  const base = `Taux de perte ${vaccine} de ${fmtPct(globalTaux)} (seuil acceptable ≤ ${seuil} %)`;
-  if (globalTaux < 0) return `${base}. Un taux négatif traduit une saisie irrégulière des flacons utilisés — à corriger dans l'outil de collecte.`;
-  if (globalTaux > seuil) return `${base} : dépassement à surveiller, vérifier la chaîne du froid et la saisie des flacons.`;
-  return `${base} : performance conforme au seuil.`;
+  if (globalTaux == null) return `Les données de gestion du vaccin ${vaccine} ne sont pas renseignées sur ce périmètre.`;
+  const taux = fmtPct(globalTaux);
+  if (globalTaux < 0) {
+    return `Le taux de perte ${vaccine} ressort à ${taux}, valeur négative qui signale une saisie incohérente des flacons (vaccinés supérieurs aux doses disponibles). À faire recroiser et corriger par les gestionnaires de données avant exploitation.`;
+  }
+  if (globalTaux > seuil) {
+    return `Le taux de perte ${vaccine} s'établit à ${taux}, au-delà du seuil acceptable de ${seuil} %. À investiguer : maîtrise de la chaîne du froid, gestion des flacons entamés et fiabilité de la saisie des mouvements de flacons.`;
+  }
+  return `Le taux de perte ${vaccine} s'établit à ${taux}, sous le seuil de ${seuil} % : la gestion du vaccin est maîtrisée sur le périmètre. À maintenir lors des prochains passages.`;
 }
 
 // Le helper fmtNum reste exporté pour les usages avancés.

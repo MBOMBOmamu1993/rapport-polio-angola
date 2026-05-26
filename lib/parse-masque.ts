@@ -225,6 +225,47 @@ function cell(row: unknown[], col1: number): unknown {
 
 const TOTAL_RE = /total/i;
 
+/**
+ * Sous-titres de récapitulation insérés dans la Synthèse, surtout dans les
+ * masques importés au niveau provincial : avant de lister les Zones de Santé
+ * d'une antenne, le masque place une ligne titre reprenant le nom du parent
+ * préfixé (« Ant.LUIZA », « ant Luiza », « ZS.KALOMBA »…). Ce ne sont pas des
+ * unités réelles : laissées en place, le parent réapparaît comme enfant dans les
+ * listes déroulantes et le rapport, et ses effectifs sont comptés deux fois.
+ * On exige un séparateur (point, espace, tiret, deux-points) après le mot-clé
+ * pour ne pas écarter de vrais noms commençant par ces lettres (ex. « ANTONIO »).
+ */
+const RECAP_RE = /^\s*(ant|antenne|zs|zone|prov|province)\b[\s.:\-]+\S/i;
+export function isRecapLabel(s: string): boolean {
+  return RECAP_RE.test(s);
+}
+
+/** Normalise un libellé pour comparaison (sans accents/casse/espaces superflus). */
+function normLabel(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toUpperCase();
+}
+
+/**
+ * Vrai si la ligne est un titre/sous-titre de récapitulation et non une Aire de
+ * Santé réelle. Deux formes rencontrées :
+ *  - un libellé préfixé du niveau parent dans une colonne enfant
+ *    (« Ant.LUIZA », « ant Luiza », « Prov. KASAÏ »…) ;
+ *  - un titre du niveau national où une colonne enfant reprend exactement le nom
+ *    de son parent (la colonne Antenne contient le nom de la Province avant de
+ *    lister ses antennes). On compare uniquement Antenne = Province, car au
+ *    niveau inférieur un vrai chef-lieu porte légitimement le nom de sa zone
+ *    (Aire de Santé LUIZA dans la Zone de Santé LUIZA).
+ */
+export function isRecapRow(province: string, antenne: string, zs: string, as: string): boolean {
+  if (isRecapLabel(antenne) || isRecapLabel(zs) || isRecapLabel(as)) return true;
+  if (antenne && province && normLabel(antenne) === normLabel(province)) return true;
+  return false;
+}
+
 /** Clé d'identification d'une Aire de Santé (insensible casse / accents / ponctuation). */
 function asKey(province: string, zs: string, as: string): string {
   const norm = (s: string) =>
@@ -267,10 +308,12 @@ export function parseMasque(buffer: ArrayBuffer, fileName: string): MasqueData {
         const r = jrows[i];
         if (!r) continue;
         const province = str(cell(r, C.province));
+        const antenne = str(cell(r, C.antenne));
         const zs = str(cell(r, C.zs));
         const as = str(cell(r, C.as));
         if (!province || !as) continue;
         if (TOTAL_RE.test(zs) || TOTAL_RE.test(as)) continue;
+        if (isRecapRow(province, antenne, zs, as)) continue;
         m.set(asKey(province, zs, as), {
           nvpo2: num(cell(r, C.nvpo2Vacc059Total)),
           vpob: num(cell(r, C.vpobVacc059Total)),
@@ -288,11 +331,13 @@ export function parseMasque(buffer: ArrayBuffer, fileName: string): MasqueData {
     const row = rows[i];
     if (!row) continue;
     const province = str(cell(row, C.province));
+    const antenne = str(cell(row, C.antenne));
     const zs = str(cell(row, C.zs));
     const as = str(cell(row, C.as));
     if (!as) continue;
     if (TOTAL_RE.test(zs) || TOTAL_RE.test(as)) continue;
     if (!province) continue;
+    if (isRecapRow(province, antenne, zs, as)) continue;
 
     const nvpo2TauxPerteRaw = cell(row, C.nvpo2TauxPerte);
     const vpobTauxPerteRaw = cell(row, C.vpobTauxPerte);
@@ -315,7 +360,7 @@ export function parseMasque(buffer: ArrayBuffer, fileName: string): MasqueData {
 
     records.push({
       province,
-      antenne: str(cell(row, C.antenne)),
+      antenne,
       zs,
       as,
       popTotale: num(cell(row, C.popTotale)),

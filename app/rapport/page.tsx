@@ -519,7 +519,7 @@ export default function RapportPage() {
             <div key={i} className="grid grid-cols-1 gap-2 rounded-lg border border-surface-200 p-2 md:grid-cols-[1fr_1fr_120px_1fr_auto]">
               <Field placeholder="Problème identifié" value={p.probleme} onChange={(v) => editRow(setProblemes, i, "probleme", v)} />
               <Field placeholder="Causes" value={p.causes} onChange={(v) => editRow(setProblemes, i, "causes", v)} />
-              <Field placeholder="Unité(s) concernée(s)" value={p.zs} onChange={(v) => editRow(setProblemes, i, "zs", v)} />
+              <Field placeholder={`${drill.label}(s) concernée(s)`} value={p.zs} onChange={(v) => editRow(setProblemes, i, "zs", v)} />
               <Field placeholder="Solutions proposées" value={p.solutions} onChange={(v) => editRow(setProblemes, i, "solutions", v)} />
               <button
                 onClick={() => setProblemes((arr) => arr.filter((_, j) => j !== i))}

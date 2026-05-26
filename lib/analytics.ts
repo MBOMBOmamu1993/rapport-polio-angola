@@ -5,7 +5,7 @@
  * l'agrégation des graphiques se fait au niveau immédiatement inférieur.
  */
 
-import { ANTIGENES, type ASRecord, type DailyValue, type MasqueData } from "./parse-masque";
+import { ANTIGENES, isRecapRow, type ASRecord, type DailyValue, type MasqueData } from "./parse-masque";
 import type { Filters } from "./store";
 import { pct } from "./format";
 
@@ -21,18 +21,30 @@ function inProvinces(r: ASRecord, f: Filters): boolean {
   return f.provinces.length === 0 || f.provinces.includes(r.province);
 }
 
+/**
+ * Écarte les lignes titres/récapitulatives où un parent est reporté dans une
+ * colonne enfant (« Ant.LUIZA » dans la colonne Zone de Santé, nom de la Province
+ * dans la colonne Antenne au niveau national…). Garde-fou pour les compilations
+ * déjà stockées avant le correctif du parseur : sans cela, le parent réapparaît
+ * comme enfant dans les listes déroulantes et dans le rapport généré.
+ */
+function isRealUnit(r: ASRecord): boolean {
+  return !isRecapRow(r.province, r.antenne, r.zs, r.as);
+}
+
 export function cascadeOptions(data: MasqueData, f: Filters): CascadeOptions {
-  const provinces = uniq(data.records.map((r) => r.province));
+  const records = data.records.filter(isRealUnit);
+  const provinces = uniq(records.map((r) => r.province));
   const antennes = uniq(
-    data.records.filter((r) => inProvinces(r, f)).map((r) => r.antenne)
+    records.filter((r) => inProvinces(r, f)).map((r) => r.antenne)
   );
   const zones = uniq(
-    data.records
+    records
       .filter((r) => inProvinces(r, f) && (!f.antenne || r.antenne === f.antenne))
       .map((r) => r.zs)
   );
   const aires = uniq(
-    data.records
+    records
       .filter(
         (r) =>
           inProvinces(r, f) &&
@@ -47,6 +59,7 @@ export function cascadeOptions(data: MasqueData, f: Filters): CascadeOptions {
 export function applyFilters(data: MasqueData, f: Filters): ASRecord[] {
   return data.records.filter(
     (r) =>
+      isRealUnit(r) &&
       inProvinces(r, f) &&
       (!f.antenne || r.antenne === f.antenne) &&
       (!f.zs || r.zs === f.zs) &&
