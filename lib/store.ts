@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { MasqueData } from "./parse-masque";
+import { normalizeFlaconsRecus, type MasqueData } from "./parse-masque";
 
 export interface Filters {
   /** Provinces sélectionnées (multi-sélection). Vide = toutes les provinces. */
@@ -66,8 +66,12 @@ export const useApp = create<AppState>()(
     }),
     {
       name: "polio-angola-masque",
-      version: 2,
-      // Normalise les états persistés antérieurs (province unique → tableau de provinces).
+      version: 3,
+      // Normalise les états persistés antérieurs :
+      //  - v2 : province unique → tableau de provinces ;
+      //  - v3 : réaligne les flacons reçus d'un masque importé avant le correctif
+      //    (qui additionnaient la colonne auto « complémentaires ») sur le total
+      //    reçu réel, pour ne pas régénérer un rapport gonflé sans réimport.
       migrate: (persisted) => {
         const state = (persisted ?? {}) as { data?: MasqueData | null; filters?: Record<string, unknown> };
         const f = state.filters ?? {};
@@ -82,6 +86,9 @@ export const useApp = create<AppState>()(
           zs: (f.zs as string | null) ?? null,
           as: (f.as as string | null) ?? null,
         };
+        if (state.data?.records?.length) {
+          state.data = { ...state.data, records: normalizeFlaconsRecus(state.data.records) };
+        }
         return state as unknown as AppState;
       },
     }

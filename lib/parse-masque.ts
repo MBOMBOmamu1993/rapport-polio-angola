@@ -333,6 +333,30 @@ export function sanitizeRecords(records: ASRecord[]): ASRecord[] {
   return kept.filter((r) => !removed.has(r));
 }
 
+/**
+ * Filet de sécurité rétroactif sur les flacons reçus, appliqué à toute donnée
+ * déjà compilée (Vercel KV, store du navigateur) — pas seulement aux nouveaux
+ * imports.
+ *
+ * Contexte : avant correctif, le total des flacons reçus additionnait la colonne
+ * auto « Flacons complémentaires reçus (Ne pas remplir) » (col. 150 nVPO2 / 212
+ * VPOb) au « Total Flacons reçus journalièrement » (col. 149 / 211), gonflant les
+ * reçus de toutes les provinces / antennes / ZS / AS importées avant la
+ * correction. Les enregistrements persistés gardent cette valeur erronée.
+ *
+ * Ancre fiable : `*FlaconsUtil` vaut la colonne 149/211 seule — jamais affectée
+ * par le bug. Le total reçu correct vaut donc cette même colonne. On réaligne
+ * `*FlaconsRecus` sur `*FlaconsUtil`. Opération idempotente : sans effet sur les
+ * imports déjà corrects (où les deux sont déjà égaux).
+ */
+export function normalizeFlaconsRecus(records: ASRecord[]): ASRecord[] {
+  return records.map((r) =>
+    r.nvpo2FlaconsRecus === r.nvpo2FlaconsUtil && r.vpobFlaconsRecus === r.vpobFlaconsUtil
+      ? r
+      : { ...r, nvpo2FlaconsRecus: r.nvpo2FlaconsUtil, vpobFlaconsRecus: r.vpobFlaconsUtil }
+  );
+}
+
 /** Clé d'identification d'une Aire de Santé (insensible casse / accents / ponctuation). */
 function asKey(province: string, zs: string, as: string): string {
   const norm = (s: string) =>

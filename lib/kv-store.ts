@@ -7,7 +7,7 @@
  */
 
 import { createClient, type VercelKV } from "@vercel/kv";
-import { sanitizeRecords, type ASRecord, type MasqueData } from "./parse-masque";
+import { normalizeFlaconsRecus, sanitizeRecords, type ASRecord, type MasqueData } from "./parse-masque";
 
 const INDEX_KEY = "polio:zs:index";
 
@@ -115,9 +115,16 @@ export async function readNational(): Promise<{
   entities: { province: string; antenne: string; zs: string; importedAt: string; nbAires: number; periode: string }[];
 }> {
   const blocks = await readNationalBlocks();
-  // Assainit la compilation consolidée : écarte les sous-totaux/titres qui ont pu
-  // être importés avant le correctif (sinon le parent est recompté au national).
-  const records: ASRecord[] = sanitizeRecords(blocks.flatMap((b) => b.records));
+  // Assainit la compilation consolidée :
+  //  - écarte les sous-totaux/titres importés avant le correctif (sinon le parent
+  //    est recompté au national) ;
+  //  - réaligne les flacons reçus sur la colonne « Total reçus journalièrement »
+  //    pour les blocs compilés avant le correctif (qui additionnaient à tort la
+  //    colonne auto « complémentaires »). Corrige rétroactivement toutes les
+  //    provinces / antennes / ZS / AS déjà stockées, sans réimport.
+  const records: ASRecord[] = normalizeFlaconsRecus(
+    sanitizeRecords(blocks.flatMap((b) => b.records))
+  );
 
   const provinces = uniq(records.map((r) => r.province));
   const antennes = uniq(records.map((r) => r.antenne));
