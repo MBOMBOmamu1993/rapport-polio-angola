@@ -43,15 +43,17 @@ const C = {
   // nVPO2 — cibles (repli sur cible 0-59 si bloc dédié vide)
   nvpo2CibleDenombre: 144,
   // nVPO2 — gestion vaccin. Colonnes réelles du masque :
-  //  149 = Total flacons reçus journalièrement par les équipes (= flacons utilisés,
-  //        base du taux de perte du masque : taux = 1 − vaccinés / (149 × 50))
-  //  150 = Flacons complémentaires reçus (auto, « ne pas remplir »)
+  //  149 = TOTAL flacons reçus journalièrement par les équipes (mouvement de flacons).
+  //        C'est le total reçu faisant foi ET la base du taux de perte du masque :
+  //        taux = 1 − vaccinés / (149 × 50).
+  //  150 = Flacons complémentaires reçus — colonne AUTO « Ne pas remplir » : valeur
+  //        d'assistance calculée par le masque, à NE PAS additionner au total reçu
+  //        (col. 149 le contient déjà). L'ajouter gonflait le nombre de flacons reçus.
   //  152 = Flacons inutilisables (entamés, cassés, virés…)
   //  153 = Flacons perdus
   //  154 = Taux de perte % (calculé par le masque)
   //  155 = Total de flacons utilisables RESTANTS dans la CDF (stock retourné)
   nvpo2FlaconsRecusJour: 149,
-  nvpo2FlaconsRecusCompl: 150,
   nvpo2Inutilisables: 152,
   nvpo2Perdus: 153,
   nvpo2TauxPerte: 154,
@@ -65,9 +67,10 @@ const C = {
   vpobUrbain: 201,
   // VPOb — cibles
   vpobCibleDenombre: 206,
-  // VPOb — gestion vaccin (mêmes colonnes que nVPO2, doses/flacon = 20)
+  // VPOb — gestion vaccin (mêmes colonnes que nVPO2, doses/flacon = 20).
+  //  211 = TOTAL flacons reçus journalièrement (fait foi). 212 = complémentaires
+  //  « Ne pas remplir » (auto) — à NE PAS additionner au total reçu.
   vpobFlaconsRecusJour: 211,
-  vpobFlaconsRecusCompl: 212,
   vpobInutilisables: 214,
   vpobPerdus: 215,
   vpobTauxPerte: 216,
@@ -441,7 +444,10 @@ export function parseMasque(buffer: ArrayBuffer, fileName: string): MasqueData {
       nvpo2CibleExtrap: num(cell(row, C.cible059)),
       nvpo2CibleDenombre: num(cell(row, C.nvpo2CibleDenombre)),
       nvpo2ZeroDose: num(cell(row, C.nvpo2ZeroDose011)) + num(cell(row, C.nvpo2ZeroDose1259)),
-      nvpo2FlaconsRecus: num(cell(row, C.nvpo2FlaconsRecusJour)) + num(cell(row, C.nvpo2FlaconsRecusCompl)),
+      // Total reçu = col. 149 seule (« Total Flacons reçus journalièrement »). On
+      // n'ajoute plus la col. 150 « complémentaires (Ne pas remplir) » : c'est une
+      // colonne auto déjà comprise dans le total, dont l'ajout doublait les reçus.
+      nvpo2FlaconsRecus: num(cell(row, C.nvpo2FlaconsRecusJour)),
       nvpo2FlaconsRendus: num(cell(row, C.nvpo2StockCDF)),
       nvpo2Perdus: num(cell(row, C.nvpo2Perdus)),
       // Base du taux de perte du masque : flacons reçus journalièrement (× 50 doses).
@@ -454,7 +460,9 @@ export function parseMasque(buffer: ArrayBuffer, fileName: string): MasqueData {
       vpobCibleExtrap: num(cell(row, C.cible059)),
       vpobCibleDenombre: num(cell(row, C.vpobCibleDenombre)),
       vpobZeroDose: num(cell(row, C.vpobZeroDose011)) + num(cell(row, C.vpobZeroDose1259)),
-      vpobFlaconsRecus: num(cell(row, C.vpobFlaconsRecusJour)) + num(cell(row, C.vpobFlaconsRecusCompl)),
+      // Total reçu = col. 211 seule ; on n'ajoute plus la col. 212 « complémentaires
+      // (Ne pas remplir) », colonne auto qui doublait le nombre de flacons reçus.
+      vpobFlaconsRecus: num(cell(row, C.vpobFlaconsRecusJour)),
       vpobFlaconsRendus: num(cell(row, C.vpobStockCDF)),
       vpobPerdus: num(cell(row, C.vpobPerdus)),
       // Base du taux de perte du masque : flacons reçus journalièrement (× 20 doses).
