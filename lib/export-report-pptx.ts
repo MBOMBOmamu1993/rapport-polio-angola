@@ -935,8 +935,10 @@ function buildGestion(
   ];
 
   const tableY = 1.3;
-  const rowH = 0.38;
-  const perPage = rowsPerPage(tableY, 5.85, 0.6, rowH);
+  const rowH = 0.36;
+  // Le tableau doit s'arrêter NETTEMENT au-dessus du bandeau « Commentaire »
+  // (y ≈ 6,2). On pagine en conséquence pour ne jamais le chevaucher.
+  const perPage = rowsPerPage(tableY, 6.0, 0.55, rowH);
   const pages = chunkRows([...bodyRows, totalRow], perPage);
   // Pour garder un graphique lisible quand beaucoup d'entités sont présentées
   // (toutes les ZS d'une province, toutes les AS d'une ZS…), on ne trace plus un
@@ -953,7 +955,7 @@ function buildGestion(
     const s = pptx.addSlide();
     ctx.addHeader(s, `Gestion du vaccin : ${vaccine}${suiteSuffix(idx, pages.length)}`, `Seuil acceptable de perte : ≤ ${seuil} %`);
     s.addTable([head, ...pageRows], {
-      x: 0.45, y: tableY, w: 7.1, colW: [1.6, 0.95, 0.95, 0.95, 0.95, 1.05, 0.65],
+      x: 0.45, y: tableY, w: 7.1, colW: [1.5, 0.9, 0.9, 0.9, 0.9, 1.1, 0.9],
       border: { type: "solid", color: "DEE5EE", pt: 0.5 },
       rowH, valign: "middle", fontFace: "Calibri",
     });
@@ -1057,10 +1059,10 @@ function buildProblemes(ctx: SlideCtx): void {
   }
 
   const bodyRows: PptxGenJS.TableRow[] = data.problemes.map((p): PptxGenJS.TableCell[] => [
-    { text: p.probleme, options: tdCell({ bold: true, fontSize: 13, ...cellOpts }) },
-    { text: p.causes, options: tdCell({ fontSize: 13, ...cellOpts }) },
-    { text: p.zs, options: tdCell({ align: "center", fontSize: 13, ...cellOpts }) },
-    { text: p.solutions, options: tdCell({ fontSize: 13, ...cellOpts }) },
+    { text: p.probleme, options: tdCell({ bold: true, fontSize: 14, ...cellOpts }) },
+    { text: p.causes, options: tdCell({ fontSize: 14, ...cellOpts }) },
+    { text: p.zs, options: tdCell({ align: "center", fontSize: 14, ...cellOpts }) },
+    { text: p.solutions, options: tdCell({ fontSize: 14, ...cellOpts }) },
   ]);
 
   // 3 problèmes par diapo + lignes compactes (rowH = minimum, la cellule
@@ -1144,14 +1146,15 @@ function computeColW(totalW: number, n: number, weights: number[]): number[] {
 }
 
 function addCommentBar(pptx: PptxGenJS, s: PptxGenJS.Slide, comment: string): void {
+  // Abaissé (y = 6,2) pour ne jamais recouvrir le bas des tableaux.
   s.addShape(pptx.ShapeType.roundRect, {
-    x: 0.5, y: 6.05, w: W - 1, h: 0.85,
+    x: 0.5, y: 6.2, w: W - 1, h: 0.8,
     fill: { color: ACCENT_LIGHT }, line: { color: ACCENT, width: 1 }, rectRadius: 0.05,
   });
   s.addText([
     { text: "Commentaire : ", options: { bold: true, color: ACCENT } },
     { text: comment, options: { color: NAVY_DEEP } },
-  ], { x: 0.7, y: 6.05, w: W - 1.4, h: 0.85, valign: "middle", fontSize: 14 });
+  ], { x: 0.7, y: 6.2, w: W - 1.4, h: 0.8, valign: "middle", fontSize: 14 });
 }
 
 function coverageComment(
