@@ -3,9 +3,9 @@ import "./globals.css";
 import { Nav } from "@/components/Nav";
 
 export const metadata: Metadata = {
-  title: "Rapport — Campagne polio synchronisée avec l'Angola",
+  title: "Rapport JNV Polio",
   description:
-    "Importez le masque de saisie et téléchargez le rapport PowerPoint de la campagne de vaccination polio synchronisée avec l'Angola.",
+    "Importez le masque de saisie et téléchargez le rapport PowerPoint des Journées Nationales de Vaccination (JNV) contre la polio.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -1,6 +1,6 @@
 /**
- * Génération du rapport PowerPoint « Campagne de vaccination polio synchronisée
- * avec l'Angola » — reproduit fidèlement le modèle officiel Kwango en ne gardant
+ * Génération du rapport PowerPoint « Journées Nationales de Vaccination (JNV)
+ * contre la polio » — reproduit fidèlement le modèle officiel Kwango en ne gardant
  * que la composante polio (nVPO2 et VPOb, co-administration). Mise en page
  * Power BI : bandeaux navy, tableau par ZS × par jour avec coloration des cellules
  * selon les seuils 0–80 %, 80–95 %, 95–100 %, > 100 %.
@@ -225,7 +225,7 @@ export async function exportReportPPT(data: ReportData): Promise<void> {
   buildProblemes(ctx);
   buildMerci(ctx);
 
-  await pptx.writeFile({ fileName: `Rapport_Polio_Angola_${slug(data.scopeLabel)}.pptx` });
+  await pptx.writeFile({ fileName: `Rapport_JNV_Polio_${slug(data.scopeLabel)}.pptx` });
 }
 
 /* ─── Layout commun ────────────────────────────────────────────────────── */
@@ -264,7 +264,7 @@ function addHeaderFactory(
     }
 
     // Pied de page.
-    s.addText("Campagne de vaccination polio synchronisée avec l'Angola — nVPO2 & VPOb (co-administration)", {
+    s.addText("Rapport JNV Polio — nVPO2 & VPOb (co-administration)", {
       x: 0.55, y: H - 0.36, w: W - 4.2, h: 0.28, fontSize: 10, color: GREY, align: "left",
     });
     s.addText(data.scopeLabel, {
@@ -300,7 +300,7 @@ function buildCover(ctx: SlideCtx, cover: string | null): void {
     fontSize: 18, color: ACCENT_LIGHT, bold: true, charSpacing: 4, fontFace: "Calibri",
   });
   // Titre principal.
-  s.addText("Campagne de vaccination polio synchronisée avec l'Angola", {
+  s.addText("Journées Nationales de Vaccination contre la polio", {
     x: 0.6, y: 2.45, w: 5.4, h: 1.75,
     fontSize: 32, color: "FFFFFF", bold: true, fontFace: "Calibri", lineSpacingMultiple: 1.05,
   });
