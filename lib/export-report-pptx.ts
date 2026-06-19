@@ -1037,48 +1037,43 @@ function buildProblemes(ctx: SlideCtx): void {
   // Pluralise le premier mot du libellé d'unité (Aire de Santé → Aires de Santé).
   const concLabel = `${data.byUnitLabel.replace(/^(\S+)/, "$1s")} concernées`;
   const head: PptxGenJS.TableCell[] = ["Problèmes identifiés", "Causes", concLabel, "Solutions proposées"]
-    .map((h) => ({ text: h, options: thHeader({ fontSize: 12 }) }));
+    .map((h) => ({ text: h, options: thHeader({ fontSize: 15 }) }));
 
-  // Géométrie : la zone utile va du bas du bandeau (~1.3") au bas de diapo
-  // avec une marge (≈ 7.1"). On répartit les lignes pour rester dans ce cadre.
-  const TOP = 1.3;
-  const BOTTOM = 7.15;
-  const colW = [3.2, 3.05, 2.05, 3.6];
-  const cellOpts = { margin: [3, 4, 3, 4] as [number, number, number, number] };
+  const TOP = 1.35;
+  const colW = [3.4, 3.0, 2.0, 3.5];
+  const cellOpts = { margin: [4, 5, 4, 5] as [number, number, number, number] };
 
   if (data.problemes.length === 0) {
     const s = pptx.addSlide();
     ctx.addHeader(s, "Problèmes rencontrés / Actions correctrices");
     s.addTable([head, [
-      { text: "Aucun problème majeur détecté par l'analyse sur ce périmètre — indicateurs conformes aux seuils.", options: tdCell({ fontSize: 13, italic: true, color: GREY, colspan: 4, align: "center", ...cellOpts }) },
+      { text: "Aucun problème majeur détecté par l'analyse sur ce périmètre — indicateurs conformes aux seuils.", options: tdCell({ fontSize: 14, italic: true, color: GREY, colspan: 4, align: "center", ...cellOpts }) },
     ]], {
       x: 0.45, y: TOP, w: W - 0.9, colW,
       border: { type: "solid", color: "DEE5EE", pt: 0.5 },
-      rowH: 0.55, valign: "middle", fontFace: "Calibri", autoPage: false,
+      rowH: 0.5, valign: "middle", fontFace: "Calibri", autoPage: false,
     });
     return;
   }
 
   const bodyRows: PptxGenJS.TableRow[] = data.problemes.map((p): PptxGenJS.TableCell[] => [
-    { text: p.probleme, options: tdCell({ bold: true, fontSize: 11, valign: "top", ...cellOpts }) },
-    { text: p.causes, options: tdCell({ fontSize: 11, valign: "top", ...cellOpts }) },
-    { text: p.zs, options: tdCell({ align: "center", fontSize: 11, valign: "top", ...cellOpts }) },
-    { text: p.solutions, options: tdCell({ fontSize: 11, valign: "top", ...cellOpts }) },
+    { text: p.probleme, options: tdCell({ bold: true, fontSize: 13, ...cellOpts }) },
+    { text: p.causes, options: tdCell({ fontSize: 13, ...cellOpts }) },
+    { text: p.zs, options: tdCell({ align: "center", fontSize: 13, ...cellOpts }) },
+    { text: p.solutions, options: tdCell({ fontSize: 13, ...cellOpts }) },
   ]);
 
-  // Contenu dense (plusieurs lignes par cellule) : 3 problèmes par diapo
-  // garantissent que les lignes ne débordent pas du cadre vertical.
+  // 3 problèmes par diapo + lignes compactes (rowH = minimum, la cellule
+  // s'agrandit au besoin) : le tableau reste lisible sans déborder.
   const perPage = 3;
   const pages = chunkRows(bodyRows, perPage);
   pages.forEach((pageRows, idx) => {
     const s = pptx.addSlide();
     ctx.addHeader(s, `Problèmes rencontrés / Actions correctrices${suiteSuffix(idx, pages.length)}`);
-    // Hauteur de ligne répartie sur l'espace utile (en-tête + lignes du corps).
-    const rowH = (BOTTOM - TOP) / (pageRows.length + 1);
     s.addTable([head, ...pageRows], {
       x: 0.45, y: TOP, w: W - 0.9, colW,
       border: { type: "solid", color: "DEE5EE", pt: 0.5 },
-      rowH, valign: "top", fontFace: "Calibri", autoPage: false,
+      rowH: 0.4, valign: "middle", fontFace: "Calibri", autoPage: false,
     });
   });
 }
