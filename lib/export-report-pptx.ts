@@ -784,13 +784,16 @@ function buildRecup(ctx: SlideCtx): void {
     // ne masque jamais les dernières entités, comme c'était le cas auparavant.
     const perPage = Math.max(4, Math.floor((5.7 - tableY - 0.85) / 0.4));
     const pages = chunkRows([...bodyRows, totalRow], perPage);
-    const groupLabel = groupCount > 1 ? ` — antigènes ${g.start + 1} à ${g.end} (${gi + 1}/${groupCount})` : "";
     pages.forEach((pageRows, idx) => {
       const s = pptx.addSlide();
+      // Titre court (constant) : tout le contexte de pagination passe en sous-titre
+      // pour éviter que le titre déborde sur deux lignes et chevauche le sous-titre.
+      const grp = groupCount > 1 ? ` (groupe ${gi + 1}/${groupCount})` : "";
+      const pg = pages.length > 1 ? ` · page ${idx + 1}/${pages.length}` : "";
       ctx.addHeader(
         s,
-        `Récupération des enfants en PEV de routine${groupLabel}${suiteSuffix(idx, pages.length)}`,
-        "Par antigène : Nb identifiés · Nb récupéré · % récupéré — toutes tranches d'âge"
+        "Récupération des enfants en PEV de routine",
+        `Antigènes ${g.start + 1} à ${g.end}${grp}${pg} — toutes tranches d'âge`
       );
       s.addTable([headTop, headSub, ...pageRows], {
         x: 0.25, y: tableY, w: W - 0.5, colW,
