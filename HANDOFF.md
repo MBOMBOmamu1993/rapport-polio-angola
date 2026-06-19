@@ -1,4 +1,4 @@
-# Handoff — Mise à jour du rapport polio Angola (v2)
+# Handoff — Mise à jour du Rapport JNV Polio (v2)
 
 Ce package contient les fichiers à intégrer dans le dépôt
 [`MBOMBOmamu1993/rapport-polio-angola`](https://github.com/MBOMBOmamu1993/rapport-polio-angola)

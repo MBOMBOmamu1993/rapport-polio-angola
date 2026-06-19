@@ -1,5 +1,5 @@
 /**
- * Parseur du masque de saisie de la campagne polio synchronisée avec l'Angola.
+ * Parseur du masque de saisie des Journées Nationales de Vaccination (JNV) contre la polio.
  *
  * Le masque est un classeur Excel identique pour toutes les provinces / antennes /
  * zones de santé. La feuille « Synthèse » contient, par Aire de Santé, l'ensemble
@@ -9,7 +9,7 @@
  *
  * Seule la composante POLIO (nVPO2 et VPOb) est conservée — la Rougeole-Rubéole
  * (RR) est entièrement ignorée puisqu'elle ne fait pas partie de cette campagne
- * synchronisée avec l'Angola (co-administration polio uniquement).
+ * (JNV polio, co-administration polio uniquement).
  */
 
 import * as XLSX from "xlsx";
