@@ -168,24 +168,21 @@ function computeProblemes(byUnit: UnitAgg[], t: Totals, unitLabel: string): Prob
 
   // Récupération PEV de routine — analyse par entité (enfants ZD = zéro dose,
   // SV = sous-vaccinés), à partir des enfants identifiés / récupérés par antigène.
-  const identTotalU = (u: UnitAgg) => u.antigenesIdentifies.reduce((a, b) => a + b, 0);
-  const recupTotalU = (u: UnitAgg) => u.antigenesEV.reduce((a, b) => a + b, 0);
-  const datasetHasIdent = byUnit.some((u) => identTotalU(u) > 0);
+  const identTotalU = (u: UnitAgg) => (u.antigenesIdentifies ?? []).reduce((a, b) => a + b, 0);
+  const recupTotalU = (u: UnitAgg) => (u.antigenesEV ?? []).reduce((a, b) => a + b, 0);
 
   // 8 bis. Non identification des enfants ZD ou SV : aucune donnée d'identification
   // par antigène dans la feuille « Donnees de base » du masque pour ces entités.
-  // Signalé seulement si au moins une entité du périmètre est renseignée — sinon le
-  // bloc « identification » n'a pas été saisi du tout (anomalie globale, pas par ZS).
-  if (datasetHasIdent) {
-    const sansIdent = byUnit.filter((u) => identTotalU(u) === 0).map((u) => u.unit);
-    if (sansIdent.length > 0) {
-      out.push({
-        probleme: "Non identification des enfants ZD ou SV",
-        causes: "Non encodage des listes des enfants à conflit vaccinal dans le masque de saisie, dénombrement non réalisé, non identification par les RECO",
-        zs: joinUnits(sansIdent),
-        solutions: "Encoder les données des enfants ZD et SV identifiés dans le masque de saisie de la campagne",
-      });
-    }
+  // On alerte dès qu'une entité n'a aucun enfant identifié — y compris lorsque tout
+  // le périmètre est concerné (ex. Kinshasa sans bloc identification saisi).
+  const sansIdent = byUnit.filter((u) => identTotalU(u) === 0).map((u) => u.unit);
+  if (sansIdent.length > 0) {
+    out.push({
+      probleme: "Non identification des enfants ZD ou SV",
+      causes: "Non encodage des listes des enfants à conflit vaccinal dans le masque de saisie, dénombrement non réalisé, non identification par les RECO",
+      zs: joinUnits(sansIdent),
+      solutions: "Encoder les données des enfants ZD et SV identifiés dans le masque de saisie de la campagne",
+    });
   }
 
   // 8 ter. Non récupération des enfants ZD ou SV : enfants identifiés mais aucune
