@@ -1,7 +1,8 @@
-# Rapport — Campagne de vaccination polio synchronisée avec l'Angola
+# Rapport JNV Polio — Journées Nationales de Vaccination contre la polio
 
-Application web à **deux pages** pour les 5 provinces de la RDC organisant la
-campagne polio synchronisée avec l'Angola (co-administration **nVPO2** + **VPOb**).
+Application web à **deux pages** pour les provinces de la RDC organisant les
+Journées Nationales de Vaccination (JNV) contre la polio (co-administration
+**nVPO2** + **VPOb**).
 
 1. **Importer le masque de saisie** — chaque niveau (province / antenne / zone de
    santé) importe son masque Excel. Les analyses sont calculées instantanément
@@ -28,8 +29,8 @@ campagne polio synchronisée avec l'Angola (co-administration **nVPO2** + **VPOb
 - **Lecture des feuilles `Jour1` / `Jour2` / … du masque** pour produire les
   colonnes journalières (les feuilles vides ne génèrent pas de colonne).
 - **Composante RR retirée** — le rapport ne traite plus que la partie polio
-  (nVPO2 et VPOb) puisque la campagne synchronisée avec l'Angola est une
-  campagne polio + co-administration.
+  (nVPO2 et VPOb) puisque les JNV polio sont une campagne polio +
+  co-administration.
 
 ## Développement
 

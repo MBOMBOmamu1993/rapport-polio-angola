@@ -145,6 +145,8 @@ export interface UnitAgg {
   rapportsAttendusDaily: number[];
   /** Enfants vaccinés par antigène (somme par unité) — ordre = ANTIGENES. */
   antigenesEV: number[];
+  /** Enfants identifiés pour récupération par antigène (somme par unité) — ordre = ANTIGENES. */
+  antigenesIdentifies: number[];
   survPFA: number;
   survRougeole: number;
   survFJ: number;
@@ -170,6 +172,7 @@ export function aggregateByUnit(records: ASRecord[], level: DrillLevel): UnitAgg
         rapportsRecusDaily: new Array(nbJours).fill(0),
         rapportsAttendusDaily: new Array(nbJours).fill(0),
         antigenesEV: new Array(ANTIGENES.length).fill(0),
+        antigenesIdentifies: new Array(ANTIGENES.length).fill(0),
         survPFA: 0, survRougeole: 0, survFJ: 0, survTNN: 0,
       };
       map.set(k, a);
@@ -198,6 +201,7 @@ export function aggregateByUnit(records: ASRecord[], level: DrillLevel): UnitAgg
       a.rapportsAttendusDaily[i] += r.nvpo2Daily[i]?.rapportsAttendus ?? 0;
     }
     for (let j = 0; j < a.antigenesEV.length; j++) a.antigenesEV[j] += r.antigenesEV?.[j] ?? 0;
+    for (let j = 0; j < a.antigenesIdentifies.length; j++) a.antigenesIdentifies[j] += r.antigenesIdentifies?.[j] ?? 0;
     a.survPFA += r.survPFA ?? 0;
     a.survRougeole += r.survRougeole ?? 0;
     a.survFJ += r.survFJ ?? 0;
@@ -240,6 +244,8 @@ export interface Totals {
   mapiGraves: number;
   /** Enfants vaccinés par antigène (total) — ordre = ANTIGENES. */
   antigenesEV: number[];
+  /** Enfants identifiés pour récupération par antigène (total) — ordre = ANTIGENES. */
+  antigenesIdentifies: number[];
   survPFA: number;
   survRougeole: number;
   survFJ: number;
@@ -306,6 +312,7 @@ export function totals(records: ASRecord[]): Totals {
     mapiMineures: s((r) => r.mapiMineures),
     mapiGraves: s((r) => r.mapiGraves),
     antigenesEV: ANTIGENES.map((_, j) => records.reduce((acc, r) => acc + (r.antigenesEV?.[j] ?? 0), 0)),
+    antigenesIdentifies: ANTIGENES.map((_, j) => records.reduce((acc, r) => acc + (r.antigenesIdentifies?.[j] ?? 0), 0)),
     survPFA: s((r) => r.survPFA ?? 0),
     survRougeole: s((r) => r.survRougeole ?? 0),
     survFJ: s((r) => r.survFJ ?? 0),

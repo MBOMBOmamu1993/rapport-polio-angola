@@ -1,8 +1,8 @@
 {
-  "name": "rapport-polio-angola",
+  "name": "rapport-jnv-polio",
   "version": "1.0.0",
   "private": true,
-  "description": "Rapport de la campagne de vaccination polio synchronisée avec l'Angola — import du masque de saisie et génération du rapport PowerPoint.",
+  "description": "Rapport des Journées Nationales de Vaccination (JNV) contre la polio — import du masque de saisie et génération du rapport PowerPoint.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

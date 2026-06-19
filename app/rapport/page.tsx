@@ -303,7 +303,7 @@ export default function RapportPage() {
       };
     });
     const recupByUnit = byUnit.map((a) => ({ unit: a.unit, value: a.recup }));
-    const recupAntigenByUnit = byUnit.map((a) => ({ unit: a.unit, ev: a.antigenesEV }));
+    const recupAntigenByUnit = byUnit.map((a) => ({ unit: a.unit, ev: a.antigenesEV, ident: a.antigenesIdentifies }));
     const survByUnit = byUnit.map((a) => ({
       unit: a.unit, pfa: a.survPFA, rougeole: a.survRougeole, fj: a.survFJ, tnn: a.survTNN,
     }));
@@ -350,6 +350,7 @@ export default function RapportPage() {
       antigenLabels: ANTIGENES.map((a) => a.label),
       recupAntigenByUnit,
       recupAntigenTotals: ANTIGENES.map((_, j) => t.antigenesEV[j] ?? 0),
+      recupAntigenIdentTotals: ANTIGENES.map((_, j) => t.antigenesIdentifies[j] ?? 0),
       survByUnit,
       survTotals: { pfa: t.survPFA, rougeole: t.survRougeole, fj: t.survFJ, tnn: t.survTNN },
       problemes,
@@ -470,11 +471,11 @@ export default function RapportPage() {
             "Spatialisation de la complétude (carte RDC des Zones de Santé)",
             "Couvertures vaccinales nVPO2 par jour (cible / vaccinés / couverture)",
             "Couvertures vaccinales VPOb par jour",
-            "Récupération PEV de routine — enfants vaccinés par antigène (EV)",
+            "Récupération PEV de routine — identifiés / récupérés / % par antigène",
             "Gestion du vaccin nVPO2 (flacons reçus / utilisés / rendus / perdus)",
             "Gestion du vaccin VPOb",
             "Surveillance des MPV par ZS (PFA, Rougeole, FJ, TNN)",
-            "Surveillance des MAPI",
+            "Synthèse Surveillance MAPI et récupération en routine",
             "Problèmes / Actions correctrices",
             "Merci pour votre attention",
           ].map((s, i) => (

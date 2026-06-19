@@ -27,7 +27,7 @@ export function Nav() {
         </div>
         <div className="mr-auto leading-tight">
           <div className="text-sm font-bold text-white md:text-base">
-            Campagne polio synchronisée avec l&apos;Angola
+            Rapport JNV Polio
           </div>
           <div className="text-[11px] text-accent-100/80 md:text-xs">
             nVPO2 &amp; VPOb (co-administration)
