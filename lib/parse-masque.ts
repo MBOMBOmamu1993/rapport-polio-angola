@@ -114,6 +114,19 @@ export const ANTIGENES: { key: string; label: string; col: number }[] = [
 ];
 const ANTIGENE_OFFSETS = [0, 34, 68]; // tranches 0-11, 12-23, 24-59 mois
 
+/**
+ * Enfants IDENTIFIÉS pour récupération en PEV de routine, par antigène — lus dans
+ * la feuille « Donnees de base », bloc « IDENTIFICATION DES ENFANTS … POUR
+ * RECUPERATION EN ROUTINE ». Les 15 antigènes (même ordre que `ANTIGENES`) sont
+ * répétés pour chaque tranche d'âge :
+ *  - 0-11 mois  : colonnes AF..AT (1-based 32..46), AU = TOTAL ;
+ *  - 12-23 mois : colonnes AV..BJ (48..62), BK = TOTAL ;
+ *  - 24-59 mois : colonnes BL..BZ (64..78), CA = TOTAL.
+ * Le nombre d'identifiés d'un antigène est la somme des trois tranches d'âge.
+ */
+const IDENT_BASE_COL = 32; // colonne AF — BCG 0-11 mois
+const IDENT_OFFSETS = [0, 16, 32]; // tranches 0-11, 12-23, 24-59 mois (pas de 16 colonnes)
+
 export interface DailyValue {
   /** Index du jour (1-based : Jour1 = 1, Jour2 = 2, …) */
   day: number;
@@ -174,6 +187,8 @@ export interface ASRecord {
   mapiGraves: number;
   /** Enfants vaccinés par antigène (EV), somme des tranches d'âge — ordre = ANTIGENES. */
   antigenesEV: number[];
+  /** Enfants IDENTIFIÉS pour récupération par antigène, somme des tranches d'âge — ordre = ANTIGENES. */
+  antigenesIdentifies: number[];
   // Surveillance des MPV (cas notifiés)
   survPFA: number;
   survRougeole: number;
@@ -387,6 +402,34 @@ export function parseMasque(buffer: ArrayBuffer, fileName: string): MasqueData {
   }
   jourSheets.sort((a, b) => a.day - b.day);
 
+  // ── 1 bis. Feuille « Donnees de base » : enfants identifiés par antigène ───
+  // Même structure d'identification que la Synthèse (Province/Antenne/ZS/AS en
+  // colonnes 1..4). On indexe par Aire de Santé pour rapprocher chaque ligne de
+  // son enregistrement de Synthèse.
+  let baseRows: unknown[][] = [];
+  const baseSheetName = wb.SheetNames.find((n) => /donn[eé]es de base/i.test(n));
+  if (baseSheetName) {
+    baseRows = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[baseSheetName], { header: 1, blankrows: false });
+  }
+  const identMap = new Map<string, number[]>();
+  for (let i = 3; i < baseRows.length; i++) {
+    const r = baseRows[i];
+    if (!r) continue;
+    const province = str(cell(r, C.province));
+    const antenne = str(cell(r, C.antenne));
+    const zs = str(cell(r, C.zs));
+    const as = str(cell(r, C.as));
+    if (!province || !as) continue;
+    if (TOTAL_RE.test(zs) || TOTAL_RE.test(as)) continue;
+    if (isRecapRow(province, antenne, zs, as)) continue;
+    identMap.set(
+      asKey(province, zs, as),
+      ANTIGENES.map((_, j) =>
+        IDENT_OFFSETS.reduce((sum, off) => sum + num(cell(r, IDENT_BASE_COL + off + j)), 0)
+      )
+    );
+  }
+
   // Pré-calcul : pour chaque jour, une map AS → {vacc nvpo2, vacc vpob, rapports
   // attendus et reçus DU JOUR}. Les feuilles JourN ont la même structure de
   // colonnes que la Synthèse : col. 90 = Attendus du jour, col. 91 = Reçus du jour.
@@ -504,6 +547,7 @@ export function parseMasque(buffer: ArrayBuffer, fileName: string): MasqueData {
       antigenesEV: ANTIGENES.map((a) =>
         ANTIGENE_OFFSETS.reduce((sum, off) => sum + num(cell(row, a.col + off)), 0)
       ),
+      antigenesIdentifies: identMap.get(key) ?? new Array(ANTIGENES.length).fill(0),
       survPFA: num(cell(row, C.survPFA)),
       survRougeole: num(cell(row, C.survRougeole)),
       survFJ: num(cell(row, C.survFJ)),
@@ -524,10 +568,7 @@ export function parseMasque(buffer: ArrayBuffer, fileName: string): MasqueData {
   // ── 3. Méta-données du classeur ──────────────────────────────────────────
   let periode = "";
   let pays = "RD CONGO";
-  const baseName = wb.SheetNames.find((n) => /donn[eé]es de base/i.test(n));
-  if (baseName) {
-    const base = wb.Sheets[baseName];
-    const baseRows = XLSX.utils.sheet_to_json<unknown[]>(base, { header: 1, blankrows: false });
+  if (baseRows.length > 0) {
     const r0 = baseRows[0] ?? [];
     periode = str(cell(r0, 2));
     const paysVal = str(cell(r0, 5));

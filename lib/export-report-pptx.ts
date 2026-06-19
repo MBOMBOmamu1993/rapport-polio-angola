@@ -91,8 +91,12 @@ export interface ReportData {
   recupByUnit: UnitValue[];
   /** Récupération PEV — enfants vaccinés par antigène. */
   antigenLabels: string[];
-  recupAntigenByUnit: { unit: string; ev: number[] }[];
+  /** Par unité : `ev` = enfants récupérés (vaccinés), `ident` = enfants identifiés — ordre = antigenLabels. */
+  recupAntigenByUnit: { unit: string; ev: number[]; ident: number[] }[];
+  /** Totaux « enfants récupérés » par antigène. */
   recupAntigenTotals: number[];
+  /** Totaux « enfants identifiés » par antigène. */
+  recupAntigenIdentTotals: number[];
   /** Surveillance des MPV (cas notifiés). */
   survByUnit: { unit: string; pfa: number; rougeole: number; fj: number; tnn: number }[];
   survTotals: { pfa: number; rougeole: number; fj: number; tnn: number };
@@ -340,7 +344,7 @@ function buildPlan(ctx: SlideCtx): void {
     "Gestion du vaccin nVPO2 — flacons & taux de perte",
     "Gestion du vaccin VPOb — flacons & taux de perte",
     "Surveillance des MPV par Zone de Santé",
-    "Surveillance des MAPI",
+    "Synthèse Surveillance MAPI et récupération en routine",
     "Problèmes rencontrés / Actions correctrices",
   ];
   items.forEach((it, i) => {
@@ -677,36 +681,74 @@ function buildRecup(ctx: SlideCtx): void {
     return;
   }
 
-  const head: PptxGenJS.TableCell[] = [
-    { text: data.byUnitLabel, options: thHeader() },
-    ...ant.map((a): PptxGenJS.TableCell => ({ text: a, options: thHeader() })),
+  const ident = data.recupAntigenIdentTotals;
+  const totalIdentifies = ident.reduce((a, b) => a + b, 0);
+  const tauxRecupGlobal = totalIdentifies > 0 ? (totalEnfants / totalIdentifies) * 100 : null;
+
+  // En-tête sur deux niveaux : chaque antigène coiffe 3 sous-colonnes
+  //  « Nb identifiés | Nb récupéré | % récupéré ».
+  const headTop: PptxGenJS.TableCell[] = [
+    { text: data.byUnitLabel, options: thHeader({ rowspan: 2, fontSize: 9 }) },
+    ...ant.map((a): PptxGenJS.TableCell => ({ text: a, options: thHeader({ colspan: 3, fontSize: 9 }) })),
   ];
+  const headSub: PptxGenJS.TableCell[] = ant.flatMap((): PptxGenJS.TableCell[] => [
+    { text: "Nb\nident.", options: thHeader({ fontSize: 7 }) },
+    { text: "Nb\nrécup.", options: thHeader({ fontSize: 7 }) },
+    { text: "%\nrécup.", options: thHeader({ fontSize: 7 }) },
+  ]);
+
+  const recCell = (ev: number, id: number): PptxGenJS.TableCell[] => {
+    const taux = id > 0 ? (ev / id) * 100 : null;
+    return [
+      { text: fmtInt(id), options: tdCell({ align: "right", fontSize: 8 }) },
+      { text: fmtInt(ev), options: tdCell({ align: "right", fontSize: 8 }) },
+      { text: fmtPct(taux, 0), options: tdCell({ align: "right", bold: true, fontSize: 8, color: ACCENT }) },
+    ];
+  };
+
   const bodyRows: PptxGenJS.TableRow[] = rows.map((r): PptxGenJS.TableCell[] => [
-    { text: r.unit, options: tdCell({ bold: true }) },
-    ...r.ev.map((v): PptxGenJS.TableCell => ({ text: fmtInt(v), options: tdCell({ align: "right" }) })),
+    { text: r.unit, options: tdCell({ bold: true, fontSize: 8 }) },
+    ...ant.flatMap((_, j) => recCell(r.ev[j] ?? 0, r.ident?.[j] ?? 0)),
   ]);
   const totalRow: PptxGenJS.TableRow = [
-    { text: "Total", options: thTotal() },
-    ...totals.map((v): PptxGenJS.TableCell => ({ text: fmtInt(v), options: thTotal({ align: "right" }) })),
+    { text: "Total", options: thTotal({ fontSize: 8 }) },
+    ...ant.flatMap((_, j): PptxGenJS.TableCell[] => {
+      const id = ident[j] ?? 0;
+      const ev = totals[j] ?? 0;
+      const taux = id > 0 ? (ev / id) * 100 : null;
+      return [
+        { text: fmtInt(id), options: thTotal({ align: "right", fontSize: 8 }) },
+        { text: fmtInt(ev), options: thTotal({ align: "right", fontSize: 8 }) },
+        { text: fmtPct(taux, 0), options: thTotal({ align: "right", fontSize: 8 }) },
+      ];
+    }),
   ];
 
-  const nCols = 1 + ant.length;
-  const colW = computeColW(W - 0.9, nCols, [1.7, ...ant.map(() => 0.75)]);
+  const nCols = 1 + ant.length * 3;
+  const colW = computeColW(W - 0.5, nCols, [1.6, ...ant.flatMap(() => [0.5, 0.5, 0.55])]);
 
-  const tableY = 1.4;
-  const rowH = 0.34;
-  const perPage = rowsPerPage(tableY, 5.9, 0.5, rowH);
+  const tableY = 1.5;
+  const rowH = 0.3;
+  const perPage = rowsPerPage(tableY, 5.9, 0.7, rowH);
   const pages = chunkRows([...bodyRows, totalRow], perPage);
   pages.forEach((pageRows, idx) => {
     const s = pptx.addSlide();
-    ctx.addHeader(s, `Récupération des enfants en PEV de routine${suiteSuffix(idx, pages.length)}`, "Enfants vaccinés (EV) par antigène pendant la campagne — toutes tranches d'âge");
-    s.addTable([head, ...pageRows], {
-      x: 0.45, y: tableY, w: W - 0.9, colW,
+    ctx.addHeader(
+      s,
+      `Récupération des enfants en PEV de routine${suiteSuffix(idx, pages.length)}`,
+      "Par antigène : Nb identifiés · Nb récupéré · % récupéré — toutes tranches d'âge"
+    );
+    s.addTable([headTop, headSub, ...pageRows], {
+      x: 0.25, y: tableY, w: W - 0.5, colW,
       border: { type: "solid", color: "DEE5EE", pt: 0.5 },
-      rowH, valign: "middle", fontFace: "Calibri", fontSize: 10,
+      rowH, valign: "middle", fontFace: "Calibri", fontSize: 8,
       autoPage: false,
     });
-    addCommentBar(pptx, s, `${fmtInt(data.saillants.recup)} enfants récupérés au PEV de routine — ${fmtInt(totalEnfants)} doses d'antigènes administrées (co-administration polio + PEV).`);
+    addCommentBar(
+      pptx,
+      s,
+      `${fmtInt(totalIdentifies)} enfants identifiés pour tous les antigènes — ${fmtInt(totalEnfants)} récupérés au PEV de routine, soit ${fmtPct(tauxRecupGlobal, 1)} de récupération (co-administration polio + PEV).`
+    );
   });
 }
 
@@ -883,21 +925,40 @@ function buildGestion(
 function buildMapi(ctx: SlideCtx): void {
   const { pptx, data } = ctx;
   const s = pptx.addSlide();
-  ctx.addHeader(s, "Surveillance des MAPI", "Manifestations adverses post-immunisation");
+  ctx.addHeader(s, "Synthèse Surveillance MAPI et récupération en routine", "Manifestations adverses post-immunisation & récupération PEV de routine");
   const sa = data.saillants;
-  const card = (x: number, label: string, value: string, color: string) => {
-    s.addShape(pptx.ShapeType.roundRect, { x, y: 2.2, w: 3.6, h: 2.5, fill: { color: "FFFFFF" }, line: { color, width: 2 }, rectRadius: 0.1 });
-    s.addShape(pptx.ShapeType.rect, { x, y: 2.2, w: 3.6, h: 0.5, fill: { color } });
-    s.addText(label, { x: x + 0.15, y: 2.2, w: 3.3, h: 0.5, valign: "middle", align: "center", color: "FFFFFF", bold: true, fontSize: 17 });
-    s.addText(value, { x, y: 2.85, w: 3.6, h: 1.6, align: "center", valign: "middle", fontSize: 60, bold: true, color });
+
+  const totalIdentifies = data.recupAntigenIdentTotals.reduce((a, b) => a + b, 0);
+  const totalRecuperes = data.recupAntigenTotals.reduce((a, b) => a + b, 0);
+  const tauxRecup = totalIdentifies > 0 ? (totalRecuperes / totalIdentifies) * 100 : null;
+
+  // Carte générique paramétrable (position, taille, corps de police).
+  const card = (
+    x: number, y: number, w: number, h: number,
+    label: string, value: string, color: string, valueFont = 54, labelFont = 15
+  ) => {
+    s.addShape(pptx.ShapeType.roundRect, { x, y, w, h, fill: { color: "FFFFFF" }, line: { color, width: 2 }, rectRadius: 0.1 });
+    s.addShape(pptx.ShapeType.rect, { x, y, w, h: 0.62, fill: { color } });
+    s.addText(label, { x: x + 0.1, y, w: w - 0.2, h: 0.62, valign: "middle", align: "center", color: "FFFFFF", bold: true, fontSize: labelFont });
+    s.addText(value, { x, y: y + 0.68, w, h: h - 0.78, align: "center", valign: "middle", fontSize: valueFont, bold: true, color });
   };
-  card(0.9, "MAPI mineures", fmtInt(sa.mapiMineures), ACCENT);
-  card(4.85, "MAPI graves", fmtInt(sa.mapiGraves), sa.mapiGraves ? THR_LOW : THR_HIGH);
-  card(8.8, "Récupérations PEV", fmtInt(sa.recup), THR_HIGH);
+
+  // Rangée 1 — surveillance MAPI + récupérations PEV (3 cartes).
+  const r1y = 1.45, r1h = 2.2, r1w = 3.7, r1gap = 0.3;
+  const r1x0 = (W - (3 * r1w + 2 * r1gap)) / 2;
+  card(r1x0, r1y, r1w, r1h, "MAPI mineures", fmtInt(sa.mapiMineures), ACCENT, 52, 16);
+  card(r1x0 + (r1w + r1gap), r1y, r1w, r1h, "MAPI graves", fmtInt(sa.mapiGraves), sa.mapiGraves ? THR_LOW : THR_HIGH, 52, 16);
+  card(r1x0 + 2 * (r1w + r1gap), r1y, r1w, r1h, "Récupérations PEV", fmtInt(sa.recup), THR_HIGH, 52, 16);
+
+  // Rangée 2 — synthèse récupération en routine, tous antigènes confondus (2 cartes).
+  const r2y = 3.95, r2h = 2.05, r2w = 5.7, r2gap = 0.4;
+  const r2x0 = (W - (2 * r2w + r2gap)) / 2;
+  card(r2x0, r2y, r2w, r2h, "Nombre total enfants identifiés (tous antigènes confondus)", fmtInt(totalIdentifies), NAVY, 44, 14);
+  card(r2x0 + (r2w + r2gap), r2y, r2w, r2h, "% Enfants récupérés (tous antigènes confondus)", fmtPct(tauxRecup, 1), THR_HIGH, 44, 14);
 
   s.addText(
     "Toute MAPI grave doit faire l'objet d'une investigation immédiate, d'une notification au niveau supérieur et d'une prise en charge médicale, conformément au guide de surveillance.",
-    { x: 0.9, y: 5.0, w: 11.5, h: 0.9, fontSize: 16, italic: true, color: GREY, align: "center" }
+    { x: 0.9, y: 6.15, w: 11.5, h: 0.7, fontSize: 13, italic: true, color: GREY, align: "center" }
   );
 }
 
