@@ -692,7 +692,7 @@ function buildRecup(ctx: SlideCtx): void {
   // sur l'ensemble du masque. Affiché à 1 décimale comme le masque (« 42,9 % »).
   const pctRecup = (ev: number, id: number): string => {
     const t = id > 0 ? (ev / id) * 100 : null;
-    return t === null ? "—" : `${t.toFixed(1).replace(".", ",")} %`;
+    return t === null ? "—" : `${t.toFixed(1).replace(".", ",")}%`;
   };
 
   // Totaux par entité, tous antigènes confondus (colonnes « Total » du tableau).
@@ -718,22 +718,22 @@ function buildRecup(ctx: SlideCtx): void {
   }
 
   const subHead = (): PptxGenJS.TableCell[] => [
-    { text: "Nb\nident.", options: thHeader({ fontSize: 7 }) },
-    { text: "Nb\nrécup.", options: thHeader({ fontSize: 7 }) },
-    { text: "%\nrécup.", options: thHeader({ fontSize: 7 }) },
+    { text: "Nb\nident.", options: thHeader({ fontSize: 10 }) },
+    { text: "Nb\nrécup.", options: thHeader({ fontSize: 10 }) },
+    { text: "%\nrécup.", options: thHeader({ fontSize: 10 }) },
   ];
   const recCell = (ev: number, id: number): PptxGenJS.TableCell[] => [
-    { text: fmtInt(id), options: tdCell({ align: "right", fontSize: 8 }) },
-    { text: fmtInt(ev), options: tdCell({ align: "right", fontSize: 8 }) },
-    { text: pctRecup(ev, id), options: tdCell({ align: "right", bold: true, fontSize: 8, color: ACCENT }) },
+    { text: fmtInt(id), options: tdCell({ align: "right", fontSize: 12 }) },
+    { text: fmtInt(ev), options: tdCell({ align: "right", fontSize: 12 }) },
+    { text: pctRecup(ev, id), options: tdCell({ align: "right", bold: true, fontSize: 11, color: ACCENT }) },
   ];
   const totCell = (id: number, ev: number, total = false): PptxGenJS.TableCell[] => {
     const base = total ? thTotal : tdCell;
     const fill = total ? undefined : { color: GREY_BG };
     return [
-      { text: fmtInt(id), options: base({ align: "right", bold: true, fontSize: 8, ...(fill ? { fill } : {}) }) },
-      { text: fmtInt(ev), options: base({ align: "right", bold: true, fontSize: 8, ...(fill ? { fill } : {}) }) },
-      { text: pctRecup(ev, id), options: base({ align: "right", bold: true, fontSize: 8, color: total ? "FFFFFF" : ACCENT, ...(fill ? { fill } : {}) }) },
+      { text: fmtInt(id), options: base({ align: "right", bold: true, fontSize: 12, ...(fill ? { fill } : {}) }) },
+      { text: fmtInt(ev), options: base({ align: "right", bold: true, fontSize: 12, ...(fill ? { fill } : {}) }) },
+      { text: pctRecup(ev, id), options: base({ align: "right", bold: true, fontSize: 11, color: total ? "FFFFFF" : ACCENT, ...(fill ? { fill } : {}) }) },
     ];
   };
 
@@ -742,47 +742,47 @@ function buildRecup(ctx: SlideCtx): void {
 
     // En-tête sur deux niveaux : antigènes du groupe + bloc « TOTAL ».
     const headTop: PptxGenJS.TableCell[] = [
-      { text: data.byUnitLabel, options: thHeader({ rowspan: 2, fontSize: 9 }) },
-      ...groupAnt.map((a): PptxGenJS.TableCell => ({ text: a, options: thHeader({ colspan: 3, fontSize: 9 }) })),
-      { text: "TOTAL (tous antigènes)", options: thHeader({ colspan: 3, fontSize: 8, fill: { color: NAVY_DEEP } }) },
+      { text: data.byUnitLabel, options: thHeader({ rowspan: 2, fontSize: 12 }) },
+      ...groupAnt.map((a): PptxGenJS.TableCell => ({ text: a, options: thHeader({ colspan: 3, fontSize: 13 }) })),
+      { text: "TOTAL (tous antigènes)", options: thHeader({ colspan: 3, fontSize: 11, fill: { color: NAVY_DEEP } }) },
     ];
     const headSub: PptxGenJS.TableCell[] = [
       ...groupAnt.flatMap(() => subHead()),
-      { text: "Nb total\nidentifiés", options: thHeader({ fontSize: 7, fill: { color: NAVY_DEEP } }) },
-      { text: "Nb total\nrécupéré", options: thHeader({ fontSize: 7, fill: { color: NAVY_DEEP } }) },
-      { text: "%\nrécupération", options: thHeader({ fontSize: 7, fill: { color: NAVY_DEEP } }) },
+      { text: "Nb total\nidentifiés", options: thHeader({ fontSize: 10, fill: { color: NAVY_DEEP } }) },
+      { text: "Nb total\nrécupéré", options: thHeader({ fontSize: 10, fill: { color: NAVY_DEEP } }) },
+      { text: "%\nrécupération", options: thHeader({ fontSize: 10, fill: { color: NAVY_DEEP } }) },
     ];
 
     const bodyRows: PptxGenJS.TableRow[] = rows.map((r, ri): PptxGenJS.TableCell[] => [
-      { text: r.unit, options: tdCell({ bold: true, fontSize: 8 }) },
+      { text: r.unit, options: tdCell({ bold: true, fontSize: 11 }) },
       ...groupAnt.flatMap((_, k) => recCell(r.ev[g.start + k] ?? 0, r.ident?.[g.start + k] ?? 0)),
       ...totCell(grandIdentByUnit[ri], grandEvByUnit[ri]),
     ]);
     const totalRow: PptxGenJS.TableRow = [
-      { text: "Total", options: thTotal({ fontSize: 8 }) },
+      { text: "Total", options: thTotal({ fontSize: 12 }) },
       ...groupAnt.flatMap((_, k): PptxGenJS.TableCell[] => {
         const j = g.start + k;
         const id = ident[j] ?? 0;
         const ev = totals[j] ?? 0;
         return [
-          { text: fmtInt(id), options: thTotal({ align: "right", fontSize: 8 }) },
-          { text: fmtInt(ev), options: thTotal({ align: "right", fontSize: 8 }) },
-          { text: pctRecup(ev, id), options: thTotal({ align: "right", fontSize: 8 }) },
+          { text: fmtInt(id), options: thTotal({ align: "right", fontSize: 12 }) },
+          { text: fmtInt(ev), options: thTotal({ align: "right", fontSize: 12 }) },
+          { text: pctRecup(ev, id), options: thTotal({ align: "right", fontSize: 11 }) },
         ];
       }),
       ...totCell(totalIdentifies, totalEnfants, true),
     ];
 
     const nCols = 1 + groupAnt.length * 3 + 3;
-    const colW = computeColW(W - 0.5, nCols, [1.9, ...groupAnt.flatMap(() => [0.52, 0.52, 0.56]), 0.72, 0.72, 0.74]);
+    const colW = computeColW(W - 0.5, nCols, [2.1, ...groupAnt.flatMap(() => [0.55, 0.55, 0.62]), 0.78, 0.78, 0.82]);
 
     const tableY = 1.5;
-    const rowH = 0.3;
+    const rowH = 0.42;
     // Pagination volontairement prudente : on réserve une marge sous le tableau
-    // (≈ 0,4″/ligne pour tenir compte des noms de ZS sur deux lignes) afin que le
-    // tableau s'arrête NETTEMENT au-dessus du bandeau « Commentaire » (y ≈ 6,05) et
-    // ne masque jamais les dernières entités, comme c'était le cas auparavant.
-    const perPage = Math.max(4, Math.floor((5.7 - tableY - 0.85) / 0.4));
+    // (≈ 0,5″/ligne pour les libellés sur deux lignes) afin que le tableau s'arrête
+    // NETTEMENT au-dessus du bandeau « Commentaire » (y ≈ 6,05) et ne masque jamais
+    // les dernières entités.
+    const perPage = Math.max(4, Math.floor((5.75 - tableY - 0.95) / 0.46));
     const pages = chunkRows([...bodyRows, totalRow], perPage);
     pages.forEach((pageRows, idx) => {
       const s = pptx.addSlide();
@@ -798,7 +798,7 @@ function buildRecup(ctx: SlideCtx): void {
       s.addTable([headTop, headSub, ...pageRows], {
         x: 0.25, y: tableY, w: W - 0.5, colW,
         border: { type: "solid", color: "DEE5EE", pt: 0.5 },
-        rowH, valign: "middle", fontFace: "Calibri", fontSize: 8,
+        rowH, valign: "middle", fontFace: "Calibri", fontSize: 11,
         autoPage: false,
       });
       addCommentBar(
