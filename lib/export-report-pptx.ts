@@ -668,7 +668,9 @@ function buildRecup(ctx: SlideCtx): void {
   const ant = data.antigenLabels;
   const rows = data.recupAntigenByUnit;
   const totals = data.recupAntigenTotals;
-  const hasData = totals.some((v) => v > 0);
+  // On affiche le tableau dès qu'il y a des enfants identifiés OU récupérés : une
+  // récupération nulle partout reste informative en regard des identifiés.
+  const hasData = totals.some((v) => v > 0) || data.recupAntigenIdentTotals.some((v) => v > 0);
   const totalEnfants = totals.reduce((a, b) => a + b, 0);
 
   if (ant.length === 0 || !hasData) {
@@ -685,18 +687,33 @@ function buildRecup(ctx: SlideCtx): void {
   const totalIdentifies = ident.reduce((a, b) => a + b, 0);
   const tauxRecupGlobal = totalIdentifies > 0 ? (totalEnfants / totalIdentifies) * 100 : null;
 
-  // En-tête sur deux niveaux : chaque antigène coiffe 3 sous-colonnes
-  //  « Nb identifiés | Nb récupéré | % récupéré ».
-  const headTop: PptxGenJS.TableCell[] = [
-    { text: data.byUnitLabel, options: thHeader({ rowspan: 2, fontSize: 9 }) },
-    ...ant.map((a): PptxGenJS.TableCell => ({ text: a, options: thHeader({ colspan: 3, fontSize: 9 }) })),
-  ];
-  const headSub: PptxGenJS.TableCell[] = ant.flatMap((): PptxGenJS.TableCell[] => [
+  // Totaux par entité, tous antigènes confondus (colonnes « Total » du tableau).
+  const grandIdentByUnit = rows.map((r) => r.ident.reduce((a, b) => a + b, 0));
+  const grandEvByUnit = rows.map((r) => r.ev.reduce((a, b) => a + b, 0));
+
+  // Chaque antigène pèse 3 sous-colonnes (Nb identifiés | Nb récupéré | % récupéré) :
+  // le tableau des 15 antigènes est trop large pour une seule diapo. On répartit
+  // donc les antigènes sur plusieurs diapos (≤ 6 par diapo) pour garder une bonne
+  // lisibilité. Les 3 colonnes « Total » (tous antigènes confondus) sont répétées
+  // sur chaque diapo afin que chacune soit autoportante.
+  const MAX_ANT_PER_SLIDE = 6;
+  const groupCount = Math.max(1, Math.ceil(ant.length / MAX_ANT_PER_SLIDE));
+  const baseSize = Math.floor(ant.length / groupCount);
+  let rem = ant.length % groupCount;
+  const groups: { start: number; end: number }[] = [];
+  let cursor = 0;
+  for (let g = 0; g < groupCount; g++) {
+    const size = baseSize + (rem > 0 ? 1 : 0);
+    if (rem > 0) rem--;
+    groups.push({ start: cursor, end: cursor + size });
+    cursor += size;
+  }
+
+  const subHead = (): PptxGenJS.TableCell[] => [
     { text: "Nb\nident.", options: thHeader({ fontSize: 7 }) },
     { text: "Nb\nrécup.", options: thHeader({ fontSize: 7 }) },
     { text: "%\nrécup.", options: thHeader({ fontSize: 7 }) },
-  ]);
-
+  ];
   const recCell = (ev: number, id: number): PptxGenJS.TableCell[] => {
     const taux = id > 0 ? (ev / id) * 100 : null;
     return [
@@ -705,50 +722,85 @@ function buildRecup(ctx: SlideCtx): void {
       { text: fmtPct(taux, 0), options: tdCell({ align: "right", bold: true, fontSize: 8, color: ACCENT }) },
     ];
   };
+  const totCell = (id: number, ev: number, total = false): PptxGenJS.TableCell[] => {
+    const taux = id > 0 ? (ev / id) * 100 : null;
+    const base = total ? thTotal : tdCell;
+    const fill = total ? undefined : { color: GREY_BG };
+    return [
+      { text: fmtInt(id), options: base({ align: "right", bold: true, fontSize: 8, ...(fill ? { fill } : {}) }) },
+      { text: fmtInt(ev), options: base({ align: "right", bold: true, fontSize: 8, ...(fill ? { fill } : {}) }) },
+      { text: fmtPct(taux, 0), options: base({ align: "right", bold: true, fontSize: 8, color: total ? "FFFFFF" : ACCENT, ...(fill ? { fill } : {}) }) },
+    ];
+  };
 
-  const bodyRows: PptxGenJS.TableRow[] = rows.map((r): PptxGenJS.TableCell[] => [
-    { text: r.unit, options: tdCell({ bold: true, fontSize: 8 }) },
-    ...ant.flatMap((_, j) => recCell(r.ev[j] ?? 0, r.ident?.[j] ?? 0)),
-  ]);
-  const totalRow: PptxGenJS.TableRow = [
-    { text: "Total", options: thTotal({ fontSize: 8 }) },
-    ...ant.flatMap((_, j): PptxGenJS.TableCell[] => {
-      const id = ident[j] ?? 0;
-      const ev = totals[j] ?? 0;
-      const taux = id > 0 ? (ev / id) * 100 : null;
-      return [
-        { text: fmtInt(id), options: thTotal({ align: "right", fontSize: 8 }) },
-        { text: fmtInt(ev), options: thTotal({ align: "right", fontSize: 8 }) },
-        { text: fmtPct(taux, 0), options: thTotal({ align: "right", fontSize: 8 }) },
-      ];
-    }),
-  ];
+  groups.forEach((g, gi) => {
+    const groupAnt = ant.slice(g.start, g.end);
 
-  const nCols = 1 + ant.length * 3;
-  const colW = computeColW(W - 0.5, nCols, [1.6, ...ant.flatMap(() => [0.5, 0.5, 0.55])]);
+    // En-tête sur deux niveaux : antigènes du groupe + bloc « TOTAL ».
+    const headTop: PptxGenJS.TableCell[] = [
+      { text: data.byUnitLabel, options: thHeader({ rowspan: 2, fontSize: 9 }) },
+      ...groupAnt.map((a): PptxGenJS.TableCell => ({ text: a, options: thHeader({ colspan: 3, fontSize: 9 }) })),
+      { text: "TOTAL (tous antigènes)", options: thHeader({ colspan: 3, fontSize: 8, fill: { color: NAVY_DEEP } }) },
+    ];
+    const headSub: PptxGenJS.TableCell[] = [
+      ...groupAnt.flatMap(() => subHead()),
+      { text: "Nb total\nidentifiés", options: thHeader({ fontSize: 7, fill: { color: NAVY_DEEP } }) },
+      { text: "Nb total\nrécupéré", options: thHeader({ fontSize: 7, fill: { color: NAVY_DEEP } }) },
+      { text: "%\nrécupération", options: thHeader({ fontSize: 7, fill: { color: NAVY_DEEP } }) },
+    ];
 
-  const tableY = 1.5;
-  const rowH = 0.3;
-  const perPage = rowsPerPage(tableY, 5.9, 0.7, rowH);
-  const pages = chunkRows([...bodyRows, totalRow], perPage);
-  pages.forEach((pageRows, idx) => {
-    const s = pptx.addSlide();
-    ctx.addHeader(
-      s,
-      `Récupération des enfants en PEV de routine${suiteSuffix(idx, pages.length)}`,
-      "Par antigène : Nb identifiés · Nb récupéré · % récupéré — toutes tranches d'âge"
-    );
-    s.addTable([headTop, headSub, ...pageRows], {
-      x: 0.25, y: tableY, w: W - 0.5, colW,
-      border: { type: "solid", color: "DEE5EE", pt: 0.5 },
-      rowH, valign: "middle", fontFace: "Calibri", fontSize: 8,
-      autoPage: false,
+    const bodyRows: PptxGenJS.TableRow[] = rows.map((r, ri): PptxGenJS.TableCell[] => [
+      { text: r.unit, options: tdCell({ bold: true, fontSize: 8 }) },
+      ...groupAnt.flatMap((_, k) => recCell(r.ev[g.start + k] ?? 0, r.ident?.[g.start + k] ?? 0)),
+      ...totCell(grandIdentByUnit[ri], grandEvByUnit[ri]),
+    ]);
+    const totalRow: PptxGenJS.TableRow = [
+      { text: "Total", options: thTotal({ fontSize: 8 }) },
+      ...groupAnt.flatMap((_, k): PptxGenJS.TableCell[] => {
+        const j = g.start + k;
+        const id = ident[j] ?? 0;
+        const ev = totals[j] ?? 0;
+        const taux = id > 0 ? (ev / id) * 100 : null;
+        return [
+          { text: fmtInt(id), options: thTotal({ align: "right", fontSize: 8 }) },
+          { text: fmtInt(ev), options: thTotal({ align: "right", fontSize: 8 }) },
+          { text: fmtPct(taux, 0), options: thTotal({ align: "right", fontSize: 8 }) },
+        ];
+      }),
+      ...totCell(totalIdentifies, totalEnfants, true),
+    ];
+
+    const nCols = 1 + groupAnt.length * 3 + 3;
+    const colW = computeColW(W - 0.5, nCols, [1.9, ...groupAnt.flatMap(() => [0.52, 0.52, 0.56]), 0.72, 0.72, 0.74]);
+
+    const tableY = 1.5;
+    const rowH = 0.3;
+    // Pagination volontairement prudente : on réserve une marge sous le tableau
+    // (≈ 0,4″/ligne pour tenir compte des noms de ZS sur deux lignes) afin que le
+    // tableau s'arrête NETTEMENT au-dessus du bandeau « Commentaire » (y ≈ 6,05) et
+    // ne masque jamais les dernières entités, comme c'était le cas auparavant.
+    const perPage = Math.max(4, Math.floor((5.7 - tableY - 0.85) / 0.4));
+    const pages = chunkRows([...bodyRows, totalRow], perPage);
+    const groupLabel = groupCount > 1 ? ` — antigènes ${g.start + 1} à ${g.end} (${gi + 1}/${groupCount})` : "";
+    pages.forEach((pageRows, idx) => {
+      const s = pptx.addSlide();
+      ctx.addHeader(
+        s,
+        `Récupération des enfants en PEV de routine${groupLabel}${suiteSuffix(idx, pages.length)}`,
+        "Par antigène : Nb identifiés · Nb récupéré · % récupéré — toutes tranches d'âge"
+      );
+      s.addTable([headTop, headSub, ...pageRows], {
+        x: 0.25, y: tableY, w: W - 0.5, colW,
+        border: { type: "solid", color: "DEE5EE", pt: 0.5 },
+        rowH, valign: "middle", fontFace: "Calibri", fontSize: 8,
+        autoPage: false,
+      });
+      addCommentBar(
+        pptx,
+        s,
+        `${fmtInt(totalIdentifies)} enfants identifiés pour tous les antigènes — ${fmtInt(totalEnfants)} récupérés au PEV de routine, soit ${fmtPct(tauxRecupGlobal, 1)} de récupération (co-administration polio + PEV).`
+      );
     });
-    addCommentBar(
-      pptx,
-      s,
-      `${fmtInt(totalIdentifies)} enfants identifiés pour tous les antigènes — ${fmtInt(totalEnfants)} récupérés au PEV de routine, soit ${fmtPct(tauxRecupGlobal, 1)} de récupération (co-administration polio + PEV).`
-    );
   });
 }
 
@@ -876,15 +928,22 @@ function buildGestion(
     { text: fmtPct(globalTaux, 2), options: thTotal({ align: "right" }) },
   ];
 
-  const labels = rows.map((r) => r.unit);
-  const values = rows.map((r) => (r.taux == null ? 0 : Math.round(r.taux * 100) / 100));
-  const hasData = rows.length > 0 && values.some((v) => v !== 0);
-
   const tableY = 1.3;
   const rowH = 0.38;
   const perPage = rowsPerPage(tableY, 5.85, 0.6, rowH);
   const pages = chunkRows([...bodyRows, totalRow], perPage);
+  // Pour garder un graphique lisible quand beaucoup d'entités sont présentées
+  // (toutes les ZS d'une province, toutes les AS d'une ZS…), on ne trace plus un
+  // unique graphique surchargé : chaque diapo porte le graphique des seules
+  // entités de SON tableau. Le graphe se répartit ainsi sur autant de diapos que
+  // nécessaire, en parallèle de la pagination du tableau.
   pages.forEach((pageRows, idx) => {
+    // Entités réelles présentes sur cette diapo (hors ligne « Total » finale).
+    const pageRaw = rows.slice(idx * perPage, idx * perPage + perPage);
+    const labels = pageRaw.map((r) => r.unit);
+    const values = pageRaw.map((r) => (r.taux == null ? 0 : Math.round(r.taux * 100) / 100));
+    const pageHasData = labels.length > 0 && values.some((v) => v !== 0);
+
     const s = pptx.addSlide();
     ctx.addHeader(s, `Gestion du vaccin : ${vaccine}${suiteSuffix(idx, pages.length)}`, `Seuil acceptable de perte : ≤ ${seuil} %`);
     s.addTable([head, ...pageRows], {
@@ -893,12 +952,15 @@ function buildGestion(
       rowH, valign: "middle", fontFace: "Calibri",
     });
 
-    // Graphique de répartition du taux de perte — uniquement sur la 1ère diapo.
+    // Graphique de répartition du taux de perte — limité aux entités de la diapo.
     s.addShape(pptx.ShapeType.roundRect, { x: 7.7, y: 1.3, w: W - 8.15, h: 4.6, fill: { color: "FFFFFF" }, line: { color: "DEE5EE", width: 1 }, rectRadius: 0.06 });
-    s.addText(`Répartition du taux de perte (%) de ${vaccine} par ${data.byUnitLabel}`, {
+    const chartTitle = pages.length > 1
+      ? `Taux de perte (%) de ${vaccine} — ${data.byUnitLabel} (${idx + 1}/${pages.length})`
+      : `Répartition du taux de perte (%) de ${vaccine} par ${data.byUnitLabel}`;
+    s.addText(chartTitle, {
       x: 7.8, y: 1.37, w: W - 8.35, h: 0.45, fontSize: 15, bold: true, color: NAVY, align: "center",
     });
-    if (idx === 0 && hasData) {
+    if (pageHasData) {
       s.addChart(
         pptx.ChartType.bar,
         [{ name: `Taux de perte ${vaccine}`, labels, values }],
@@ -911,7 +973,7 @@ function buildGestion(
         }
       );
     } else {
-      s.addText(idx === 0 ? "Aucune donnée disponible pour ce périmètre." : "Voir le graphique sur la première diapositive.", {
+      s.addText("Aucune donnée disponible pour ce périmètre.", {
         x: 7.7, y: 3.3, w: W - 8.15, h: 1, align: "center", fontSize: 14, italic: true, color: GREY,
       });
     }

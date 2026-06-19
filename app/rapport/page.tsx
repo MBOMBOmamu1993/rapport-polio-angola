@@ -166,6 +166,62 @@ function computeProblemes(byUnit: UnitAgg[], t: Totals, unitLabel: string): Prob
     });
   }
 
+  // Récupération PEV de routine — analyse par entité (enfants ZD = zéro dose,
+  // SV = sous-vaccinés), à partir des enfants identifiés / récupérés par antigène.
+  const identTotalU = (u: UnitAgg) => u.antigenesIdentifies.reduce((a, b) => a + b, 0);
+  const recupTotalU = (u: UnitAgg) => u.antigenesEV.reduce((a, b) => a + b, 0);
+  const datasetHasIdent = byUnit.some((u) => identTotalU(u) > 0);
+
+  // 8 bis. Non identification des enfants ZD ou SV : aucune donnée d'identification
+  // par antigène dans la feuille « Donnees de base » du masque pour ces entités.
+  // Signalé seulement si au moins une entité du périmètre est renseignée — sinon le
+  // bloc « identification » n'a pas été saisi du tout (anomalie globale, pas par ZS).
+  if (datasetHasIdent) {
+    const sansIdent = byUnit.filter((u) => identTotalU(u) === 0).map((u) => u.unit);
+    if (sansIdent.length > 0) {
+      out.push({
+        probleme: "Non identification des enfants ZD ou SV",
+        causes: "Non encodage des listes des enfants à conflit vaccinal dans le masque de saisie, dénombrement non réalisé, non identification par les RECO",
+        zs: joinUnits(sansIdent),
+        solutions: "Encoder les données des enfants ZD et SV identifiés dans le masque de saisie de la campagne",
+      });
+    }
+  }
+
+  // 8 ter. Non récupération des enfants ZD ou SV : enfants identifiés mais aucune
+  // récupération enregistrée (nombre récupéré = 0 pour tous les antigènes).
+  const sansRecup = byUnit
+    .filter((u) => identTotalU(u) > 0 && recupTotalU(u) === 0)
+    .map((u) => u.unit);
+  if (sansRecup.length > 0) {
+    out.push({
+      probleme: "Non récupération des enfants ZD ou SV",
+      causes: "Non organisation de site de récupération en routine",
+      zs: joinUnits(sansRecup),
+      solutions: "Organiser le site de vaccination de routine",
+    });
+  }
+
+  // 8 quater. Faible récupération des enfants ZD ou SV : taux de récupération
+  // (récupérés ÷ identifiés, tous antigènes) strictement compris entre 0 et 80 %.
+  const faibleRecup = byUnit
+    .filter((u) => {
+      const id = identTotalU(u);
+      if (id <= 0) return false;
+      const taux = (recupTotalU(u) / id) * 100;
+      return taux > 0 && taux < 80;
+    })
+    .sort((a, b) => recupTotalU(a) / identTotalU(a) - recupTotalU(b) / identTotalU(b))
+    .map((u) => u.unit);
+  if (faibleRecup.length > 0) {
+    out.push({
+      probleme: "Faible récupération des enfants ZD ou SV (< 80 %)",
+      causes: "Faible sensibilisation, nombre insuffisant de sites de vaccination de routine",
+      zs: joinUnits(faibleRecup),
+      solutions: "Intensifier la récupération des enfants ZD et SV en routine",
+    });
+  }
+
   // 9. Non-notification de la surveillance des MEV (MPV).
   const survTotal = t.survPFA + t.survRougeole + t.survFJ + t.survTNN;
   if (vaccTotal > 0 && survTotal === 0) {
@@ -471,7 +527,7 @@ export default function RapportPage() {
             "Spatialisation de la complétude (carte RDC des Zones de Santé)",
             "Couvertures vaccinales nVPO2 par jour (cible / vaccinés / couverture)",
             "Couvertures vaccinales VPOb par jour",
-            "Récupération PEV de routine — identifiés / récupérés / % par antigène",
+            "Récupération PEV de routine — identifiés / récupérés / % par antigène (réparti sur plusieurs diapos)",
             "Gestion du vaccin nVPO2 (flacons reçus / utilisés / rendus / perdus)",
             "Gestion du vaccin VPOb",
             "Surveillance des MPV par ZS (PFA, Rougeole, FJ, TNN)",
