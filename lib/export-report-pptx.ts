@@ -687,6 +687,14 @@ function buildRecup(ctx: SlideCtx): void {
   const totalIdentifies = ident.reduce((a, b) => a + b, 0);
   const tauxRecupGlobal = totalIdentifies > 0 ? (totalEnfants / totalIdentifies) * 100 : null;
 
+  // % récupéré, calculé EXACTEMENT comme la colonne « CV » du masque (feuille
+  // Synthèse, colonnes HQ…) : récupéré (EV) ÷ identifié. Vérifié au cellule près
+  // sur l'ensemble du masque. Affiché à 1 décimale comme le masque (« 42,9 % »).
+  const pctRecup = (ev: number, id: number): string => {
+    const t = id > 0 ? (ev / id) * 100 : null;
+    return t === null ? "—" : `${t.toFixed(1).replace(".", ",")} %`;
+  };
+
   // Totaux par entité, tous antigènes confondus (colonnes « Total » du tableau).
   const grandIdentByUnit = rows.map((r) => r.ident.reduce((a, b) => a + b, 0));
   const grandEvByUnit = rows.map((r) => r.ev.reduce((a, b) => a + b, 0));
@@ -714,22 +722,18 @@ function buildRecup(ctx: SlideCtx): void {
     { text: "Nb\nrécup.", options: thHeader({ fontSize: 7 }) },
     { text: "%\nrécup.", options: thHeader({ fontSize: 7 }) },
   ];
-  const recCell = (ev: number, id: number): PptxGenJS.TableCell[] => {
-    const taux = id > 0 ? (ev / id) * 100 : null;
-    return [
-      { text: fmtInt(id), options: tdCell({ align: "right", fontSize: 8 }) },
-      { text: fmtInt(ev), options: tdCell({ align: "right", fontSize: 8 }) },
-      { text: fmtPct(taux, 0), options: tdCell({ align: "right", bold: true, fontSize: 8, color: ACCENT }) },
-    ];
-  };
+  const recCell = (ev: number, id: number): PptxGenJS.TableCell[] => [
+    { text: fmtInt(id), options: tdCell({ align: "right", fontSize: 8 }) },
+    { text: fmtInt(ev), options: tdCell({ align: "right", fontSize: 8 }) },
+    { text: pctRecup(ev, id), options: tdCell({ align: "right", bold: true, fontSize: 8, color: ACCENT }) },
+  ];
   const totCell = (id: number, ev: number, total = false): PptxGenJS.TableCell[] => {
-    const taux = id > 0 ? (ev / id) * 100 : null;
     const base = total ? thTotal : tdCell;
     const fill = total ? undefined : { color: GREY_BG };
     return [
       { text: fmtInt(id), options: base({ align: "right", bold: true, fontSize: 8, ...(fill ? { fill } : {}) }) },
       { text: fmtInt(ev), options: base({ align: "right", bold: true, fontSize: 8, ...(fill ? { fill } : {}) }) },
-      { text: fmtPct(taux, 0), options: base({ align: "right", bold: true, fontSize: 8, color: total ? "FFFFFF" : ACCENT, ...(fill ? { fill } : {}) }) },
+      { text: pctRecup(ev, id), options: base({ align: "right", bold: true, fontSize: 8, color: total ? "FFFFFF" : ACCENT, ...(fill ? { fill } : {}) }) },
     ];
   };
 
@@ -760,11 +764,10 @@ function buildRecup(ctx: SlideCtx): void {
         const j = g.start + k;
         const id = ident[j] ?? 0;
         const ev = totals[j] ?? 0;
-        const taux = id > 0 ? (ev / id) * 100 : null;
         return [
           { text: fmtInt(id), options: thTotal({ align: "right", fontSize: 8 }) },
           { text: fmtInt(ev), options: thTotal({ align: "right", fontSize: 8 }) },
-          { text: fmtPct(taux, 0), options: thTotal({ align: "right", fontSize: 8 }) },
+          { text: pctRecup(ev, id), options: thTotal({ align: "right", fontSize: 8 }) },
         ];
       }),
       ...totCell(totalIdentifies, totalEnfants, true),
