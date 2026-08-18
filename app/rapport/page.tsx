@@ -95,22 +95,40 @@ export default function RapportPage() {
   const loadSupervision = useCallback(async (force = false) => {
     setSupState("loading");
     setSupError(undefined);
+    const qs = new URLSearchParams();
+    if (settings.odkDateMin) qs.set("dateMin", settings.odkDateMin);
+    if (force) qs.set("force", "1");
+    // Le serveur ODK peut mettre plusieurs minutes : la route répond 202 tant que la
+    // première extraction tourne en arrière‑plan ; on réinterroge toutes les 8 s
+    // (au plus ~6 min), puis on garde les données « stale » éventuellement reçues.
+    const deadline = Date.now() + 6 * 60 * 1000;
+    let attempt = 0;
     try {
-      const qs = new URLSearchParams();
-      if (settings.odkDateMin) qs.set("dateMin", settings.odkDateMin);
-      if (force) qs.set("force", "1");
-      // Le serveur ODK peut être lent : deux tentatives.
-      let res = await fetch(`/api/supervision?${qs.toString()}`, { cache: "no-store" });
-      if (!res.ok) res = await fetch(`/api/supervision?${qs.toString()}`, { cache: "no-store" });
-      const json = (await res.json()) as SupervisionPayload;
-      if (!res.ok || !json.ok) {
+      for (;;) {
+        const res = await fetch(`/api/supervision?${qs.toString()}${attempt > 0 ? "" : ""}`, { cache: "no-store" });
+        const json = (await res.json().catch(() => ({}))) as SupervisionPayload & { pending?: boolean };
+        if (res.ok && json.ok) {
+          setSup(json);
+          setSupState("ok");
+          if (json.stale && Date.now() < deadline && attempt < 3) {
+            // Données antérieures : on laisse le rafraîchissement aboutir puis on relit une fois.
+            attempt++;
+            await new Promise((r) => setTimeout(r, 20000));
+            qs.delete("force");
+            continue;
+          }
+          return;
+        }
+        if (res.status === 202 && Date.now() < deadline) {
+          qs.delete("force");
+          await new Promise((r) => setTimeout(r, 8000));
+          continue;
+        }
         setSup(null);
         setSupError(json.reason ?? `HTTP ${res.status}`);
         setSupState("error");
         return;
       }
-      setSup(json);
-      setSupState("ok");
     } catch (e) {
       setSup(null);
       setSupError(e instanceof Error ? e.message : "réseau");
@@ -265,7 +283,7 @@ export default function RapportPage() {
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-bold text-navy-700">🛰️ Supervision des équipes (ODK — formulaire Bloc 3)</h2>
           <div className="flex items-center gap-2">
-            <SupBadge state={supState} />
+            <SupBadge state={supState} stale={Boolean(sup?.stale)} fetchedAt={sup?.fetchedAt} />
             <button onClick={() => void loadSupervision(true)} className="rounded-lg border border-surface-300 px-3 py-1.5 text-xs font-medium text-navy-700 hover:bg-surface-100">↻ Actualiser</button>
           </div>
         </div>
@@ -383,15 +401,20 @@ function editRow(setter: React.Dispatch<React.SetStateAction<ProblemeRow[]>>, in
   setter((arr) => arr.map((r, j) => (j === index ? { ...r, [key]: value } : r)));
 }
 
-function SupBadge({ state }: { state: "idle" | "loading" | "ok" | "error" }) {
+function SupBadge({ state, stale, fetchedAt }: { state: "idle" | "loading" | "ok" | "error"; stale?: boolean; fetchedAt?: string }) {
   const map = {
     idle: ["bg-surface-100 text-surface-500", "En attente"],
-    loading: ["bg-navy-50 text-navy-700", "Connexion ODK…"],
+    loading: ["bg-navy-50 text-navy-700", "Connexion ODK… (le serveur peut mettre plusieurs minutes)"],
     ok: ["bg-good-50 text-good-600", "Connecté à ODK"],
     error: ["bg-danger-50 text-danger-600", "ODK indisponible"],
   } as const;
   const [cls, label] = map[state];
-  return <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${cls}`}>{label}</span>;
+  const when = fetchedAt ? new Date(fetchedAt).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
+  return (
+    <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${cls}`} title={when ? `Extraction ODK du ${when}` : ""}>
+      {label}{state === "ok" && when ? ` · ${when}` : ""}{state === "ok" && stale ? " (mise à jour en cours)" : ""}
+    </span>
+  );
 }
 
 function FilterHeader({ label, active, onReset }: { label: string; active: boolean; onReset: () => void }) {

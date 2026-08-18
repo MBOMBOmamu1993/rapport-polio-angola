@@ -98,55 +98,97 @@ function toRecord(r: Raw): SupervisionRecord {
 }
 
 let cache: { key: string; at: number; payload: SupervisionPayload } | null = null;
+const inflight = new Map<string, Promise<SupervisionPayload>>();
 const TTL_MS = 5 * 60 * 1000;
+/** Délai maximal accordé au serveur ODK (il peut mettre plusieurs minutes). */
+const ODK_TIMEOUT_MS = 280_000;
+
+function cacheKey(cfg: ReturnType<typeof odkConfig>, dateMin: string): string {
+  return `${cfg.formId}|${cfg.province}|${dateMin}`;
+}
+function resolveDateMin(cfg: ReturnType<typeof odkConfig>, dateMin?: string): string {
+  return /^\d{4}-\d{2}-\d{2}$/.test(dateMin ?? "") ? (dateMin as string) : cfg.dateMin;
+}
+
+/** Interroge réellement le serveur ODK (long) et met à jour les caches (mémoire + KV). */
+async function refreshFromOdk(dateMin: string): Promise<SupervisionPayload> {
+  const cfg = odkConfig();
+  const key = cacheKey(cfg, dateMin);
+  const running = inflight.get(key);
+  if (running) return running;
+  const job = (async () => {
+    const query = JSON.stringify({
+      "group_identification/Province": cfg.province,
+      "group_identification/date_supervision": { $gte: dateMin },
+    });
+    const url = `${cfg.baseUrl}/api/v1/data/${cfg.formId}.json?query=${encodeURIComponent(query)}&fields=${encodeURIComponent(JSON.stringify(FIELDS))}`;
+    const auth = Buffer.from(`${cfg.username}:${cfg.password}`).toString("base64");
+    const res = await fetch(url, { headers: { Authorization: `Basic ${auth}`, Accept: "application/json" }, cache: "no-store", signal: AbortSignal.timeout(ODK_TIMEOUT_MS) });
+    if (!res.ok) throw new Error(`ODK ${res.status} ${res.statusText}`);
+    const raw = (await res.json()) as Raw[];
+    const records = (Array.isArray(raw) ? raw : [])
+      .map(toRecord)
+      .filter((r) => r.date >= dateMin)
+      .sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
+    const payload: SupervisionPayload = {
+      ok: true,
+      fetchedAt: new Date().toISOString(),
+      dateMin,
+      province: cfg.province,
+      formId: cfg.formId,
+      formTitle: DEFAULTS.formTitle,
+      total: records.length,
+      records,
+    };
+    cache = { key, at: Date.now(), payload };
+    await kvSetJSON(`rrpolio:odk:${key}`, payload);
+    return payload;
+  })();
+  inflight.set(key, job);
+  job.finally(() => inflight.delete(key)).catch(() => undefined);
+  return job;
+}
+
+export interface SupervisionLookup {
+  /** Données disponibles (fraîches ou antérieures), ou null si aucune extraction n'a encore abouti. */
+  payload: SupervisionPayload | null;
+  /** Vrai si un rafraîchissement doit être lancé en arrière‑plan. */
+  needsRefresh: boolean;
+  /** Tâche de rafraîchissement à confier à `waitUntil` (ou à attendre). */
+  refresh: () => Promise<SupervisionPayload>;
+}
 
 /**
- * Récupère les supervisions de la province depuis la date minimale. Résultat mis
- * en cache 5 minutes côté serveur (les données ODK évoluent en continu pendant la
- * campagne, mais un rafraîchissement par génération de rapport suffit).
+ * Lecture rapide (sans appel long) : cache mémoire frais → KV (dernière extraction
+ * réussie, marquée `stale`) → rien. Le serveur ODK est très lent (plusieurs minutes
+ * pour ce formulaire) : l'appel réseau est fait en arrière‑plan et le client
+ * interroge à nouveau la route jusqu'à obtenir les données.
  */
-export async function fetchSupervision(opts: { dateMin?: string; force?: boolean } = {}): Promise<SupervisionPayload> {
+export async function lookupSupervision(opts: { dateMin?: string; force?: boolean } = {}): Promise<SupervisionLookup> {
   const cfg = odkConfig();
-  const dateMin = /^\d{4}-\d{2}-\d{2}$/.test(opts.dateMin ?? "") ? (opts.dateMin as string) : cfg.dateMin;
-  const key = `${cfg.formId}|${cfg.province}|${dateMin}`;
-  if (!opts.force && cache && cache.key === key && Date.now() - cache.at < TTL_MS) return cache.payload;
+  const dateMin = resolveDateMin(cfg, opts.dateMin);
+  const key = cacheKey(cfg, dateMin);
+  const refresh = () => refreshFromOdk(dateMin);
+  if (!opts.force && cache && cache.key === key && Date.now() - cache.at < TTL_MS) {
+    return { payload: cache.payload, needsRefresh: false, refresh };
+  }
+  const saved = cache && cache.key === key ? cache.payload : await kvGetJSON<SupervisionPayload>(`rrpolio:odk:${key}`);
+  if (saved?.ok) {
+    if (!cache || cache.key !== key) cache = { key, at: Date.parse(saved.fetchedAt) || 0, payload: saved };
+    const ageMs = Date.now() - (Date.parse(saved.fetchedAt) || 0);
+    return { payload: { ...saved, stale: ageMs > TTL_MS }, needsRefresh: opts.force || ageMs > TTL_MS, refresh };
+  }
+  return { payload: null, needsRefresh: true, refresh };
+}
 
-  const query = JSON.stringify({
-    "group_identification/Province": cfg.province,
-    "group_identification/date_supervision": { $gte: dateMin },
-  });
-  const url = `${cfg.baseUrl}/api/v1/data/${cfg.formId}.json?query=${encodeURIComponent(query)}&fields=${encodeURIComponent(JSON.stringify(FIELDS))}`;
-  const auth = Buffer.from(`${cfg.username}:${cfg.password}`).toString("base64");
-  const kvKey = `rrpolio:odk:${key}`;
-  let raw: Raw[];
+/** Récupère les supervisions (attend l'appel ODK si nécessaire) — scripts / tests. */
+export async function fetchSupervision(opts: { dateMin?: string; force?: boolean } = {}): Promise<SupervisionPayload> {
+  const l = await lookupSupervision(opts);
+  if (l.payload && !l.needsRefresh) return l.payload;
   try {
-    const res = await fetch(url, { headers: { Authorization: `Basic ${auth}`, Accept: "application/json" }, cache: "no-store", signal: AbortSignal.timeout(55_000) });
-    if (!res.ok) throw new Error(`ODK ${res.status} ${res.statusText}`);
-    raw = (await res.json()) as Raw[];
+    return await l.refresh();
   } catch (e) {
-    // Serveur ODK lent / indisponible : on ressert la dernière extraction réussie
-    // (mémoire du processus, puis stockage partagé KV s'il est configuré).
-    if (cache && cache.key === key) return { ...cache.payload, stale: true };
-    const saved = await kvGetJSON<SupervisionPayload>(kvKey);
-    if (saved?.ok) return { ...saved, stale: true };
+    if (l.payload) return l.payload;
     throw e;
   }
-  const records = (Array.isArray(raw) ? raw : [])
-    .map(toRecord)
-    .filter((r) => r.date >= dateMin)
-    .sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
-
-  const payload: SupervisionPayload = {
-    ok: true,
-    fetchedAt: new Date().toISOString(),
-    dateMin,
-    province: cfg.province,
-    formId: cfg.formId,
-    formTitle: DEFAULTS.formTitle,
-    total: records.length,
-    records,
-  };
-  cache = { key, at: Date.now(), payload };
-  void kvSetJSON(kvKey, payload);
-  return payload;
 }

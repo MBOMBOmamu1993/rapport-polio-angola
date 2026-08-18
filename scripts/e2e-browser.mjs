@@ -22,7 +22,7 @@ await page.waitForTimeout(1500);
 await page.screenshot({ path: path.join(outDir, "import-2.png"), fullPage: true });
 
 await page.goto(`${base}/rapport`, { waitUntil: "load" });
-await page.waitForSelector("text=Connecté à ODK", { timeout: 150000 }).catch(() => console.log("ODK badge not ok"));
+await page.waitForSelector("text=Connecté à ODK", { timeout: 420000 }).catch(() => console.log("ODK badge not ok"));
 await page.waitForTimeout(1000);
 await page.screenshot({ path: path.join(outDir, "rapport-1.png"), fullPage: true });
 

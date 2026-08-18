@@ -1229,14 +1229,16 @@ function buildSupervision(ctx: Ctx): void {
     const shown = zsRows.slice(0, 30);
     colChart(ctx, s, { x: 0.15, y: 1.1, w: 4.6, h: 4.3 }, shown.map((z) => `${z.antenne} | ${z.zs}`), shown.map((z) => r2(z.pctASVisitees)), shown.map((z) => supColorHex(z.pctASVisitees)), { barDir: "bar", fmt: '0.0"%"', min: 0, max: 100, fontSize: 7, labelFont: 7, showAxis: false, gap: 50 });
     if (sup.mapPng) s.addImage({ data: sup.mapPng, x: 4.85, y: 1.05, w: 4.1, h: 4.1 });
-    if (sup.pointsMapPng) s.addImage({ data: sup.pointsMapPng, x: 9.05, y: 1.05, w: 4.1, h: 4.1 });
-    else if (!sup.mapPng) s.addText("Cartes indisponibles", { x: 4.85, y: 2.5, w: 8, h: 0.6, align: "center", fontSize: 12, italic: true, color: GREY });
+    if (sup.pointsMapPng) {
+      s.addImage({ data: sup.pointsMapPng, x: 9.05, y: 1.05, w: 4.1, h: 4.1 });
+      s.addText(`Points = ${fmtInt(sup.points.length)} soumissions ODK de supervision des équipes (GPS)`, { x: 9.05, y: 5.15, w: 4.1, h: 0.25, fontSize: 8, italic: true, color: GREY, fontFace: FONT, align: "center" });
+    } else if (!sup.mapPng) s.addText("Cartes indisponibles", { x: 4.85, y: 2.5, w: 8, h: 0.6, align: "center", fontSize: 12, italic: true, color: GREY });
     // Parties non supervisées : ZS avec le plus d'AS non visitées
     const nonVis = zsRows.filter((z) => z.asNonVisitees.length > 0).sort((a, b) => b.asNonVisitees.length - a.asNonVisitees.length).slice(0, 3);
     const nonVisTxt = nonVis.length
       ? `Parties non supervisées : ${nonVis.map((z) => `${z.zs} (${z.asNonVisitees.length} AS)`).join(", ")}${zsRows.filter((z) => z.asNonVisitees.length > 0).length > 3 ? "…" : ""}`
       : "Toutes les aires de santé du périmètre ont été visitées.";
-    s.addText(nonVisTxt, { x: 4.85, y: 5.2, w: 8.3, h: 0.5, fontSize: 12, color: BLACK, fontFace: FONT_TITLE, align: "center", fit: "shrink" });
+    s.addText(nonVisTxt, { x: 4.85, y: 5.4, w: 8.3, h: 0.4, fontSize: 12, color: BLACK, fontFace: FONT_TITLE, align: "center" });
     // Tableau des taux
     const t = d.total;
     const head: PptxGenJS.TableRow = ["Taux de couverture RR", "Taux de couverture nVPO2", "Taux de couverture VPOb", "Taux de complétude"].map((h) => ({ text: h, options: th(TITLE_BLUE, { fontSize: 12, fontFace: FONT_TITLE }) }));
