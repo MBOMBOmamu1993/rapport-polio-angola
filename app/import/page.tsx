@@ -79,10 +79,12 @@ export default function ImportPage() {
             <div className="mb-1 inline-block rounded-full bg-white/15 px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-accent-100">
               Étape 1 / 2
             </div>
-            <h1 className="text-2xl font-bold md:text-3xl">Importer le masque de saisie</h1>
+            <h1 className="text-2xl font-bold md:text-3xl">Importer le masque de saisie intégré RR‑Polio</h1>
             <p className="mt-1 max-w-2xl text-sm text-accent-100/90">
-              Sélectionnez le fichier Excel de votre province / antenne / zone de santé.
-              Les analyses du rapport polio (nVPO2 et VPOb) seront disponibles instantanément.
+              Sélectionnez le masque Excel « Intégration Polio‑RR » de la province du Kasaï Central
+              (ou d&apos;une antenne / zone de santé). Les analyses RR, nVPO2 et VPOb (complétude,
+              couvertures, taux de perte, MAPI, MPV, récupération PEV, âge, sexe) sont calculées
+              instantanément ; la supervision des équipes est lue directement dans ODK.
               Réimporter le masque remplace automatiquement l&apos;ancienne version.
             </p>
           </div>
@@ -123,7 +125,7 @@ export default function ImportPage() {
           )}
         </button>
         <p className="mt-4 text-[11px] text-surface-400">
-          Formats acceptés : .xlsx, .xls — feuille « Synthèse » requise
+          Formats acceptés : .xlsx — feuilles « Synthèse », « Jour1 » … « Jour6 » (ratissage) et « Donnees de base »
         </p>
       </section>
 
@@ -135,7 +137,7 @@ export default function ImportPage() {
               <span className="text-lg">✅</span>
               <span>
                 <strong>{data.meta.fileName}</strong> — {fmtInt(data.meta.nbAires)} aires de santé ·{" "}
-                {data.meta.province} · {data.meta.nbJours} jours saisis · importé le{" "}
+                {data.meta.province} · {data.meta.zones.length} ZS · jours saisis : {data.meta.jourLabels.join(", ") || "—"} · importé le{" "}
                 {new Date(data.meta.importedAt).toLocaleString("fr-FR")}
               </span>
             </div>
@@ -155,13 +157,13 @@ export default function ImportPage() {
           </h2>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
             <Kpi label="Complétude rapports" value={fmtPct(t.completude)} icon="📋" tone={t.completude} />
-            <Kpi label="Couverture nVPO2" value={fmtPct(t.nvpo2CV)} icon="💧" tone={t.nvpo2CV} />
-            <Kpi label="Couverture VPOb" value={fmtPct(t.vpobCV)} icon="💧" tone={t.vpobCV} />
-            <Kpi label="Récupérations PEV" value={fmtInt(t.recup)} icon="🔁" />
-            <Kpi label="Vaccinés nVPO2" value={fmtInt(t.nvpo2Vacc)} icon="👶" />
-            <Kpi label="Vaccinés VPOb" value={fmtInt(t.vpobVacc)} icon="👶" />
-            <Kpi label="Taux perte nVPO2" value={fmtPct(t.nvpo2TauxPerte)} icon="🧪" />
-            <Kpi label="MAPI graves" value={fmtInt(t.mapiGraves)} icon="⚕️" />
+            <Kpi label="Couverture RR" value={fmtPct(t.rr.cv)} icon="💉" tone={t.rr.cv} />
+            <Kpi label="Couverture nVPO2" value={fmtPct(t.nvpo2.cv)} icon="💧" tone={t.nvpo2.cv} />
+            <Kpi label="Couverture VPOb" value={fmtPct(t.vpob.cv)} icon="💧" tone={t.vpob.cv} />
+            <Kpi label="Vaccinés RR" value={fmtInt(t.rr.vacc)} icon="👧" />
+            <Kpi label="Vaccinés nVPO2 / VPOb" value={`${fmtInt(t.nvpo2.vacc)} / ${fmtInt(t.vpob.vacc)}`} icon="👶" />
+            <Kpi label="Taux perte RR / nVPO2 / VPOb" value={`${fmtPct(t.rr.tauxPerte, 1)} · ${fmtPct(t.nvpo2.tauxPerte, 1)} · ${fmtPct(t.vpob.tauxPerte, 1)}`} icon="🧪" />
+            <Kpi label="MAPI non graves / graves" value={`${fmtInt(t.mapiNonGraves)} / ${fmtInt(t.mapiGraves)}`} icon="⚕️" />
           </div>
 
           <div className="rounded-xl border border-surface-200 bg-white p-4 shadow-card">
@@ -199,7 +201,7 @@ function AdminReset({ onDone }: { onDone: () => Promise<void> | void }) {
     const r = await resetNational(code.trim());
     setBusy(false);
     if (r.ok) {
-      setMsg({ kind: "ok", text: `Compilation nationale réinitialisée — ${r.deleted ?? 0} zone(s) de santé supprimée(s). Chaque province peut réimporter à zéro.` });
+      setMsg({ kind: "ok", text: `Compilation réinitialisée — ${r.deleted ?? 0} zone(s) de santé supprimée(s). Chaque antenne / ZS peut réimporter à zéro.` });
       setCode("");
       setConfirm("");
       await onDone();
@@ -207,7 +209,7 @@ function AdminReset({ onDone }: { onDone: () => Promise<void> | void }) {
       const text =
         r.reason === "bad_code" ? "Code administrateur incorrect." :
         r.reason === "admin_not_configured" ? "Réinitialisation non configurée : définissez la variable d'environnement ADMIN_RESET_CODE chez l'hébergeur (Vercel), puis réessayez." :
-        r.reason === "kv_unavailable" ? "Stockage national indisponible." :
+        r.reason === "kv_unavailable" ? "Stockage partagé indisponible." :
         `Échec de la réinitialisation${r.reason ? ` (${r.reason})` : ""}.`;
       setMsg({ kind: "err", text });
     }
@@ -220,16 +222,16 @@ function AdminReset({ onDone }: { onDone: () => Promise<void> | void }) {
         onClick={() => setOpen((o) => !o)}
         className="flex w-full items-center justify-between text-left"
       >
-        <span className="text-sm font-bold text-danger-600">🔒 Zone administrateur — réinitialiser la compilation nationale</span>
+        <span className="text-sm font-bold text-danger-600">🔒 Zone administrateur — réinitialiser la compilation provinciale</span>
         <span className="text-surface-400">{open ? "▴" : "▾"}</span>
       </button>
 
       {open && (
         <div className="mt-4 space-y-3">
           <p className="text-xs text-surface-600">
-            Cette action <strong>supprime définitivement</strong> tous les imports de toutes les provinces
-            au niveau national. Chacun devra réimporter son masque à zéro. Les imports locaux sur les
-            postes ne sont pas affectés.
+            Cette action <strong>supprime définitivement</strong> tous les imports partagés (toutes les
+            antennes / ZS du Kasaï Central). Chacun devra réimporter son masque à zéro. Les imports locaux sur
+            les postes ne sont pas affectés.
           </p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <label className="block">
@@ -263,7 +265,7 @@ function AdminReset({ onDone }: { onDone: () => Promise<void> | void }) {
                 Réinitialisation…
               </>
             ) : (
-              <>🗑️ Tout réinitialiser au niveau national</>
+              <>🗑️ Tout réinitialiser (compilation provinciale)</>
             )}
           </button>
           {msg && (
@@ -281,7 +283,7 @@ function SyncBadge({ sync }: { sync: "idle" | "syncing" | "ok" | "local" }) {
   if (sync === "syncing")
     return <span className="rounded-lg bg-navy-50 px-3 py-2 text-xs font-medium text-navy-700">⏳ Synchronisation…</span>;
   if (sync === "ok")
-    return <span className="rounded-lg bg-good-50 px-3 py-2 text-xs font-medium text-good-600">🌍 Synchronisé au niveau national</span>;
+    return <span className="rounded-lg bg-good-50 px-3 py-2 text-xs font-medium text-good-600">🌍 Synchronisé (compilation provinciale)</span>;
   if (sync === "local")
     return <span className="rounded-lg bg-warn-50 px-3 py-2 text-xs font-medium text-warn-600">💾 Enregistré localement</span>;
   return null;
@@ -291,16 +293,16 @@ function NationalPanel({ entities }: { entities: EntityInfo[] | null }) {
   if (entities === null) {
     return (
       <section className="rounded-xl border border-warn-100 bg-warn-50 p-4 text-sm text-warn-600">
-        <strong>Compilation nationale non activée.</strong> Pour que les 5 provinces alimentent une vue pays
-        commune, activez le stockage partagé (Vercel KV) — voir le README. En attendant, chaque import reste
-        disponible localement.
+        <strong>Compilation partagée non activée.</strong> Pour que les antennes et zones de santé alimentent
+        une vue provinciale commune, activez le stockage partagé (Vercel KV) — voir le README. En attendant,
+        chaque import reste disponible localement.
       </section>
     );
   }
   if (entities.length === 0) {
     return (
       <section className="rounded-xl border border-surface-200 bg-white p-4 text-sm text-surface-500 shadow-card">
-        🌍 Compilation nationale activée — aucune entité importée pour le moment.
+        🌍 Compilation partagée activée — aucune entité importée pour le moment.
       </section>
     );
   }
@@ -308,7 +310,7 @@ function NationalPanel({ entities }: { entities: EntityInfo[] | null }) {
   return (
     <section className="rounded-2xl border border-navy-100 bg-white p-4 shadow-card">
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-sm font-bold text-navy-700">🌍 Compilation nationale — entités déjà importées</h2>
+        <h2 className="text-sm font-bold text-navy-700">🌍 Compilation provinciale — entités déjà importées</h2>
         <span className="text-xs text-surface-500">{provinces.length} province(s) · {entities.length} ZS</span>
       </div>
       <div className="max-h-72 overflow-auto rounded-lg border border-surface-200">

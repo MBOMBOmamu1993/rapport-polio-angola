@@ -27,10 +27,10 @@ export function Nav() {
         </div>
         <div className="mr-auto leading-tight">
           <div className="text-sm font-bold text-white md:text-base">
-            Rapport JNV Polio
+            Campagne intégrée RR‑POLIO Kasaï Central
           </div>
           <div className="text-[11px] text-accent-100/80 md:text-xs">
-            nVPO2 &amp; VPOb (co-administration)
+            Résultats partiels · masque de saisie + supervision ODK
           </div>
         </div>
         <nav className="flex gap-1.5">

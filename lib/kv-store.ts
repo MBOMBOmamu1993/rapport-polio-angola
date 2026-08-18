@@ -1,5 +1,6 @@
 /**
- * Stockage partagé côté serveur (Vercel KV) pour la compilation nationale.
+ * Stockage partagé côté serveur (Vercel KV) pour la compilation provinciale
+ * (toutes les antennes / ZS du Kasaï Central).
  *
  * Granularité : une clé par Zone de Santé — `polio:zs:<province>__<antenne>__<zs>`.
  * Réimporter une entité écrase uniquement ses ZS ; les imports simultanés de
@@ -7,9 +8,9 @@
  */
 
 import { createClient, type VercelKV } from "@vercel/kv";
-import { normalizeFlaconsRecus, sanitizeRecords, type ASRecord, type MasqueData } from "./parse-masque";
+import { MASQUE_SCHEMA, sanitizeRecords, type ASRecord, type MasqueData } from "./parse-masque";
 
-const INDEX_KEY = "polio:zs:index";
+const INDEX_KEY = "rrpolio:zs:index";
 
 /**
  * Résout les identifiants du store, quel que soit le nommage de l'intégration :
@@ -38,7 +39,22 @@ export interface ZSBlock {
   periode: string;
   fileName: string;
   importedAt: string;
+  /** Version du format des enregistrements (les blocs d'un ancien format sont ignorés). */
+  schema?: number;
+  dateDebut?: string;
+  dateFin?: string;
+  jourLabels?: string[];
   records: ASRecord[];
+}
+
+/** Lecture / écriture génériques (cache de secours des données ODK, etc.). */
+export async function kvGetJSON<T>(key: string): Promise<T | null> {
+  if (!kvAvailable()) return null;
+  try { return (await kvClient().get<T>(key)) ?? null; } catch { return null; }
+}
+export async function kvSetJSON(key: string, value: unknown): Promise<void> {
+  if (!kvAvailable()) return;
+  try { await kvClient().set(key, value); } catch { /* ignore */ }
 }
 
 export function kvAvailable(): boolean {
@@ -51,7 +67,7 @@ function slug(s: string): string {
 }
 
 function keyFor(province: string, antenne: string, zs: string): string {
-  return `polio:zs:${slug(province)}__${slug(antenne)}__${slug(zs)}`;
+  return `rrpolio:zs:${slug(province)}__${slug(antenne)}__${slug(zs)}`;
 }
 
 /** Enregistre / met à jour les ZS contenues dans un import (remplacement par ZS). */
@@ -68,6 +84,10 @@ export async function upsertImport(data: MasqueData): Promise<{ updatedZones: st
         periode: data.meta.periode,
         fileName: data.meta.fileName,
         importedAt: data.meta.importedAt,
+        schema: MASQUE_SCHEMA,
+        dateDebut: data.meta.dateDebut,
+        dateFin: data.meta.dateFin,
+        jourLabels: data.meta.jourLabels,
         records: [],
       };
       groups.set(k, g);
@@ -91,7 +111,7 @@ export async function readNationalBlocks(): Promise<ZSBlock[]> {
   const keys = await kv.smembers(INDEX_KEY);
   if (!keys || keys.length === 0) return [];
   const values = await kv.mget<ZSBlock[]>(...keys);
-  return values.filter((v): v is ZSBlock => Boolean(v && v.records));
+  return values.filter((v): v is ZSBlock => Boolean(v && v.records && v.schema === MASQUE_SCHEMA));
 }
 
 /**
@@ -115,16 +135,9 @@ export async function readNational(): Promise<{
   entities: { province: string; antenne: string; zs: string; importedAt: string; nbAires: number; periode: string }[];
 }> {
   const blocks = await readNationalBlocks();
-  // Assainit la compilation consolidée :
-  //  - écarte les sous-totaux/titres importés avant le correctif (sinon le parent
-  //    est recompté au national) ;
-  //  - réaligne les flacons reçus sur la colonne « Total reçus journalièrement »
-  //    pour les blocs compilés avant le correctif (qui additionnaient à tort la
-  //    colonne auto « complémentaires »). Corrige rétroactivement toutes les
-  //    provinces / antennes / ZS / AS déjà stockées, sans réimport.
-  const records: ASRecord[] = normalizeFlaconsRecus(
-    sanitizeRecords(blocks.flatMap((b) => b.records))
-  );
+  // Assainit la compilation consolidée : écarte les sous-totaux/titres résiduels
+  // (sinon le parent est recompté au niveau province).
+  const records: ASRecord[] = sanitizeRecords(blocks.flatMap((b) => b.records));
 
   const provinces = uniq(records.map((r) => r.province));
   const antennes = uniq(records.map((r) => r.antenne));
@@ -136,14 +149,17 @@ export async function readNational(): Promise<{
     meta: {
       pays: "RD CONGO",
       periode,
+      dateDebut: blocks.length ? mostCommon(blocks.map((b) => b.dateDebut ?? "").filter(Boolean)) : "",
+      dateFin: blocks.length ? mostCommon(blocks.map((b) => b.dateFin ?? "").filter(Boolean)) : "",
       province: provinces.length === 1 ? provinces[0] : "Niveau national",
       antennes,
       zones,
       importedAt: latest || new Date().toISOString(),
       fileName: "Compilation nationale",
       nbAires: records.length,
-      nbJours: Math.max(0, ...records.map((r) => r.nvpo2Daily?.length ?? 0)),
+      nbJours: Math.max(0, ...records.map((r) => r.dailyReports?.length ?? 0)),
       jourLabels: maxJourLabels(blocks),
+      schema: MASQUE_SCHEMA,
     },
     records,
   };
@@ -179,7 +195,7 @@ function maxJourLabels(blocks: ZSBlock[]): string[] {
   let best: string[] = [];
   for (const b of blocks) {
     const first = b.records[0];
-    const labels = first?.nvpo2Daily?.map((d) => d.label) ?? [];
+    const labels = b.jourLabels ?? first?.dailyReports?.map((d) => d.label) ?? [];
     if (labels.length > best.length) best = labels;
   }
   return best;

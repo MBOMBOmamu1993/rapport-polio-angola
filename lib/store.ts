@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { normalizeFlaconsRecus, type MasqueData } from "./parse-masque";
+import { MASQUE_SCHEMA, type MasqueData } from "./parse-masque";
 
 export interface Filters {
   /** Provinces sélectionnées (multi-sélection). Vide = toutes les provinces. */
@@ -65,29 +65,22 @@ export const useApp = create<AppState>()(
       resetFilters: () => set({ filters: emptyFilters }),
     }),
     {
-      name: "polio-angola-masque",
-      version: 3,
-      // Normalise les états persistés antérieurs :
-      //  - v2 : province unique → tableau de provinces ;
-      //  - v3 : réaligne les flacons reçus d'un masque importé avant le correctif
-      //    (qui additionnaient la colonne auto « complémentaires ») sur le total
-      //    reçu réel, pour ne pas régénérer un rapport gonflé sans réimport.
+      name: "rrpolio-kasai-central-masque",
+      version: 4,
+      // Les masques importés dans un ancien format (JNV polio) ne sont plus
+      // exploitables : on les écarte pour forcer un réimport du masque intégré.
       migrate: (persisted) => {
-        const state = (persisted ?? {}) as { data?: MasqueData | null; filters?: Record<string, unknown> };
+        const state = (persisted ?? {}) as { data?: MasqueData | null; filters?: Record<string, unknown> | Filters };
         const f = state.filters ?? {};
-        const legacyProvince = typeof f.province === "string" ? f.province : null;
         state.filters = {
-          provinces: Array.isArray(f.provinces)
-            ? (f.provinces as string[])
-            : legacyProvince
-            ? [legacyProvince]
-            : [],
+          provinces: Array.isArray(f.provinces) ? (f.provinces as string[]) : [],
           antenne: (f.antenne as string | null) ?? null,
           zs: (f.zs as string | null) ?? null,
           as: (f.as as string | null) ?? null,
         };
-        if (state.data?.records?.length) {
-          state.data = { ...state.data, records: normalizeFlaconsRecus(state.data.records) };
+        if (state.data && state.data.meta?.schema !== MASQUE_SCHEMA) {
+          state.data = null;
+          state.filters = { ...emptyFilters };
         }
         return state as unknown as AppState;
       },
