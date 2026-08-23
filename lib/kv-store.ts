@@ -7,6 +7,7 @@
  * provinces/antennes/ZS différentes écrivent des clés distinctes (pas de collision).
  */
 
+import { gzipSync, gunzipSync } from "node:zlib";
 import { createClient, type VercelKV } from "@vercel/kv";
 import { MASQUE_SCHEMA, sanitizeRecords, type ASRecord, type MasqueData } from "./parse-masque";
 
@@ -47,14 +48,68 @@ export interface ZSBlock {
   records: ASRecord[];
 }
 
-/** Lecture / écriture génériques (cache de secours des données ODK, etc.). */
+/**
+ * Lecture / écriture génériques (cache de secours des données ODK, etc.).
+ *
+ * Les valeurs sont compressées (gzip → base64) et découpées en morceaux :
+ * le plan Upstash Free refuse toute requête de plus de 10 Mo, et le paquet
+ * ODK complet a fini par dépasser ce plafond (échec d'écriture silencieux,
+ * cache figé). La clé principale ne porte qu'un manifeste `{ __gz, n }` ;
+ * les morceaux vivent dans `<clé>:gz:<i>`. Une valeur non compressée écrite
+ * par une ancienne version reste lisible telle quelle.
+ */
+const GZ_PREFIX = "gz64:";
+/** ~3 Mo par morceau : marge large sous la limite de 10 Mo/requête. */
+const GZ_CHUNK_CHARS = 3_000_000;
+/** Nombre de morceaux résiduels balayés après une écriture plus courte. */
+const GZ_SWEEP_EXTRA = 20;
+
+interface GzManifest { __gz: 1; n: number }
+function isGzManifest(v: unknown): v is GzManifest {
+  return typeof v === "object" && v !== null && (v as GzManifest).__gz === 1 && typeof (v as GzManifest).n === "number";
+}
+function gzChunkKey(key: string, i: number): string {
+  return `${key}:gz:${i}`;
+}
+
 export async function kvGetJSON<T>(key: string): Promise<T | null> {
   if (!kvAvailable()) return null;
-  try { return (await kvClient().get<T>(key)) ?? null; } catch { return null; }
+  try {
+    const kv = kvClient();
+    const head = await kv.get<unknown>(key);
+    if (head == null) return null;
+    if (!isGzManifest(head)) return head as T; // ancienne valeur non compressée
+    if (head.n < 1) return null;
+    const parts = await kv.mget<(string | null)[]>(...Array.from({ length: head.n }, (_, i) => gzChunkKey(key, i)));
+    const b64 = parts.map((p) => (typeof p === "string" && p.startsWith(GZ_PREFIX) ? p.slice(GZ_PREFIX.length) : null));
+    if (b64.some((p) => p == null)) return null; // morceau manquant → cache invalide
+    return JSON.parse(gunzipSync(Buffer.from(b64.join(""), "base64")).toString("utf8")) as T;
+  } catch (err) {
+    console.error(`KV : échec de lecture de « ${key} »`, err);
+    return null;
+  }
 }
+
 export async function kvSetJSON(key: string, value: unknown): Promise<void> {
   if (!kvAvailable()) return;
-  try { await kvClient().set(key, value); } catch { /* ignore */ }
+  try {
+    const kv = kvClient();
+    const b64 = gzipSync(Buffer.from(JSON.stringify(value), "utf8")).toString("base64");
+    const chunks: string[] = [];
+    for (let i = 0; i < b64.length; i += GZ_CHUNK_CHARS) chunks.push(b64.slice(i, i + GZ_CHUNK_CHARS));
+    // Morceaux d'abord, manifeste ensuite : un lecteur concurrent ne voit
+    // jamais un manifeste pointant vers des morceaux absents. Écriture
+    // séquentielle : l'auto-pipelining du client regrouperait des SET
+    // simultanés en une seule requête HTTP, qui redépasserait les 10 Mo.
+    for (let i = 0; i < chunks.length; i++) {
+      await kv.set(gzChunkKey(key, i), GZ_PREFIX + chunks[i]);
+    }
+    await kv.set(key, { __gz: 1, n: chunks.length } satisfies GzManifest);
+    const stale = Array.from({ length: GZ_SWEEP_EXTRA }, (_, i) => gzChunkKey(key, chunks.length + i));
+    await kv.del(...(stale as [string, ...string[]]));
+  } catch (err) {
+    console.error(`KV : échec d'écriture de « ${key} »`, err);
+  }
 }
 
 export function kvAvailable(): boolean {
