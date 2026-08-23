@@ -80,6 +80,10 @@ export interface SupervisionPayload {
   records: SupervisionRecord[];
   /** Vrai si les données proviennent d'une extraction antérieure (serveur ODK indisponible). */
   stale?: boolean;
+  /** Curseur incrémental : plus grand `_submission_time` déjà récupéré (ISO, sans fuseau). */
+  lastSubmissionTime?: string;
+  /** Vrai si l'extraction s'est arrêtée au budget de temps — la suivante reprend au curseur. */
+  partial?: boolean;
 }
 
 /** Normalise un nom d'unité (ODK slug « bena_leka » ↔ masque « BENA LEKA »). */

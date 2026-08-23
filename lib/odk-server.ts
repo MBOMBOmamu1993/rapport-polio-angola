@@ -110,26 +110,82 @@ function resolveDateMin(cfg: ReturnType<typeof odkConfig>, dateMin?: string): st
   return /^\d{4}-\d{2}-\d{2}$/.test(dateMin ?? "") ? (dateMin as string) : cfg.dateMin;
 }
 
-/** Interroge réellement le serveur ODK (long) et met à jour les caches (mémoire + KV). */
+/** Marge soustraite au point de reprise incrémental (horloges, soumissions
+ *  en cours d'envoi au moment de l'extraction précédente). */
+const INCREMENTAL_MARGIN_MS = 6 * 3600_000;
+/** Taille d'une page ODK (le serveur met ~3 ms/enregistrement + transfert). */
+const PAGE_SIZE = 2000;
+/** Budget total accordé aux pages ODK dans une même exécution (maxDuration 300 s). */
+const FETCH_BUDGET_MS = 240_000;
+
+/**
+ * Interroge réellement le serveur ODK et met à jour les caches (mémoire + KV).
+ *
+ * Le volume du formulaire a tellement grossi que la récupération complète en une
+ * requête dépasse le délai (l'extraction avortait systématiquement, cache figé).
+ * L'extraction est donc incrémentale ET paginée : on ne demande que les
+ * soumissions dont `_submission_time` est postérieur au curseur de la dernière
+ * extraction (moins une marge), triées par `_submission_time`, page par page,
+ * dans un budget de temps. Budget épuisé → la progression est sauvegardée
+ * (`partial: true`, curseur avancé) et l'exécution suivante reprend là.
+ * Les pages sont fusionnées par `_id` avec les enregistrements déjà connus.
+ */
 async function refreshFromOdk(dateMin: string): Promise<SupervisionPayload> {
   const cfg = odkConfig();
   const key = cacheKey(cfg, dateMin);
   const running = inflight.get(key);
   if (running) return running;
   const job = (async () => {
+    const prev = cache && cache.key === key ? cache.payload : await kvGetJSON<SupervisionPayload>(`rrpolio:odk:${key}`);
+    const hasPrev = Boolean(prev?.ok && prev.records.length);
+    const prevAt = hasPrev ? Date.parse(prev!.fetchedAt) : NaN;
+    const since = hasPrev
+      ? prev!.lastSubmissionTime?.slice(0, 19) ??
+        (Number.isFinite(prevAt) ? new Date(prevAt - INCREMENTAL_MARGIN_MS).toISOString().slice(0, 19) : null)
+      : null;
     const query = JSON.stringify({
       "group_identification/Province": cfg.province,
       "group_identification/date_supervision": { $gte: dateMin },
+      ...(since ? { _submission_time: { $gte: since } } : {}),
     });
-    const url = `${cfg.baseUrl}/api/v1/data/${cfg.formId}.json?query=${encodeURIComponent(query)}&fields=${encodeURIComponent(JSON.stringify(FIELDS))}`;
     const auth = Buffer.from(`${cfg.username}:${cfg.password}`).toString("base64");
-    const res = await fetch(url, { headers: { Authorization: `Basic ${auth}`, Accept: "application/json" }, cache: "no-store", signal: AbortSignal.timeout(ODK_TIMEOUT_MS) });
-    if (!res.ok) throw new Error(`ODK ${res.status} ${res.statusText}`);
-    const raw = (await res.json()) as Raw[];
-    const records = (Array.isArray(raw) ? raw : [])
-      .map(toRecord)
-      .filter((r) => r.date >= dateMin)
-      .sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
+    const headers = { Authorization: `Basic ${auth}`, Accept: "application/json" };
+    const base =
+      `${cfg.baseUrl}/api/v1/data/${cfg.formId}.json?query=${encodeURIComponent(query)}` +
+      `&fields=${encodeURIComponent(JSON.stringify(FIELDS))}` +
+      `&sort=${encodeURIComponent(JSON.stringify({ _submission_time: 1 }))}`;
+
+    const merged = new Map<number, SupervisionRecord>();
+    if (hasPrev) for (const r of prev!.records) merged.set(r.id, r);
+    const started = Date.now();
+    let cursor = since ?? "";
+    let offset = 0;
+    let received = 0;
+    let pages = 0;
+    let complete = false;
+    while (true) {
+      const remaining = FETCH_BUDGET_MS - (Date.now() - started);
+      if (remaining < 30_000) break; // budget épuisé → sauvegarde partielle
+      const res = await fetch(`${base}&start=${offset}&limit=${PAGE_SIZE}`, {
+        headers, cache: "no-store",
+        signal: AbortSignal.timeout(Math.min(ODK_TIMEOUT_MS, remaining)),
+      });
+      if (!res.ok) throw new Error(`ODK ${res.status} ${res.statusText}`);
+      const raw = (await res.json()) as Raw[];
+      const page = Array.isArray(raw) ? raw : [];
+      for (const r of page) {
+        const st = s(r._submission_time);
+        if (st > cursor) cursor = st;
+      }
+      for (const rec of page.map(toRecord).filter((r) => r.date >= dateMin)) merged.set(rec.id, rec);
+      received += page.length;
+      offset += page.length;
+      pages++;
+      if (page.length < PAGE_SIZE) { complete = true; break; }
+    }
+    if (pages === 0) throw new Error("ODK: budget épuisé avant la première page");
+
+    const records = Array.from(merged.values()).sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
     const payload: SupervisionPayload = {
       ok: true,
       fetchedAt: new Date().toISOString(),
@@ -139,9 +195,15 @@ async function refreshFromOdk(dateMin: string): Promise<SupervisionPayload> {
       formTitle: DEFAULTS.formTitle,
       total: records.length,
       records,
+      ...(cursor ? { lastSubmissionTime: cursor } : {}),
+      ...(complete ? {} : { partial: true }),
     };
     cache = { key, at: Date.now(), payload };
     await kvSetJSON(`rrpolio:odk:${key}`, payload);
+    console.log(
+      `ODK: extraction ${since ? `incrémentale depuis ${since}` : "complète"}${complete ? "" : " (PARTIELLE, reprise au prochain passage)"} — ` +
+      `${pages} page(s), ${received} reçues, ${records.length} au total, ${Math.round((Date.now() - started) / 1000)} s.`
+    );
     return payload;
   })();
   inflight.set(key, job);
@@ -170,13 +232,14 @@ export async function lookupSupervision(opts: { dateMin?: string; force?: boolea
   const key = cacheKey(cfg, dateMin);
   const refresh = () => refreshFromOdk(dateMin);
   if (!opts.force && cache && cache.key === key && Date.now() - cache.at < TTL_MS) {
-    return { payload: cache.payload, needsRefresh: false, refresh };
+    // Extraction partielle : servir ce qu'on a mais poursuivre le rattrapage.
+    return { payload: cache.payload, needsRefresh: Boolean(cache.payload.partial), refresh };
   }
   const saved = cache && cache.key === key ? cache.payload : await kvGetJSON<SupervisionPayload>(`rrpolio:odk:${key}`);
   if (saved?.ok) {
     if (!cache || cache.key !== key) cache = { key, at: Date.parse(saved.fetchedAt) || 0, payload: saved };
     const ageMs = Date.now() - (Date.parse(saved.fetchedAt) || 0);
-    return { payload: { ...saved, stale: ageMs > TTL_MS }, needsRefresh: opts.force || ageMs > TTL_MS, refresh };
+    return { payload: { ...saved, stale: ageMs > TTL_MS }, needsRefresh: opts.force || ageMs > TTL_MS || Boolean(saved.partial), refresh };
   }
   return { payload: null, needsRefresh: true, refresh };
 }
