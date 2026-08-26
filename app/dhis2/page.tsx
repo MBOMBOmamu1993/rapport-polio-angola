@@ -182,9 +182,15 @@ export default function Dhis2Page() {
   const drill = useMemo(() => resolveDrillLevel(filters, nbProv > 1), [filters, nbProv]);
   const t = useMemo(() => totals(filtered), [filtered]);
 
-  /* Supervision ODK — chargée pour une seule province à la fois (serveur très lent). */
+  /* Supervision ODK — chargée pour une seule province à la fois (serveur très lent).
+     Supervisions retenues à partir du 11/08/2026, sauf Kasaï Central et Nord Kivu
+     (lancements décalés) : à partir du 17/08/2026. */
   const supProvince = selectedBlocks.length === 1 ? selectedBlocks[0].province : null;
-  const supDateMin = selectedBlocks.length === 1 ? selectedBlocks[0].j1 : null;
+  const supDateMin = useMemo(() => {
+    if (!supProvince) return null;
+    const key = supProvince.normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/[^A-Z]/g, "");
+    return key === "KASAICENTRAL" || key === "NORDKIVU" ? "2026-08-17" : "2026-08-11";
+  }, [supProvince]);
   const loadSupervision = useCallback(async (force = false) => {
     if (!supProvince || !supDateMin) {
       setSup(null);
