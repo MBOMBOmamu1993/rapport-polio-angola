@@ -19,8 +19,11 @@ export const maxDuration = 300;
 export async function GET(req: NextRequest) {
   const dateMin = req.nextUrl.searchParams.get("dateMin") ?? undefined;
   const force = req.nextUrl.searchParams.get("force") === "1";
+  // Province du formulaire ODK (onglet DHIS2 : « Maniema », « Sud Kivu »…) ;
+  // sans paramètre, la province par défaut (Kasai_Central) est conservée.
+  const province = req.nextUrl.searchParams.get("province")?.slice(0, 40) ?? undefined;
   try {
-    const l = await lookupSupervision({ dateMin, force });
+    const l = await lookupSupervision({ dateMin, force, province });
     if (l.needsRefresh) {
       const job = l.refresh().catch(() => undefined);
       waitUntil(job);

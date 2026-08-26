@@ -60,15 +60,18 @@ export function applyFilters(data: MasqueData, f: Filters): ASRecord[] {
   );
 }
 
-export type DrillLevel = "province" | "antenne" | "zs" | "as";
+export type DrillLevel = "province" | "antenne" | "zs" | "as" | "all";
 
 /**
  * Niveau de désagrégation principal du rapport :
  *  - ZS filtrée → Aires de Santé ;
+ *  - périmètre couvrant plusieurs provinces (sans antenne / ZS filtrée) →
+ *    Provinces (les vues par Antenne et par ZS restent en complément) ;
  *  - sinon → Zones de Santé (la vue par Antenne est ajoutée en complément).
  */
-export function resolveDrillLevel(f: Filters): { level: DrillLevel; label: string } {
+export function resolveDrillLevel(f: Filters, multiProvince = false): { level: DrillLevel; label: string } {
   if (f.zs) return { level: "as", label: "Aire de Santé" };
+  if (multiProvince && !f.antenne) return { level: "province", label: "Province" };
   return { level: "zs", label: "Zone de Santé" };
 }
 
@@ -76,7 +79,14 @@ export function scopeLabel(f: Filters, province = "Kasaï Central"): string {
   if (f.as) return `Aire de Santé : ${f.as}`;
   if (f.zs) return `Zone de Santé : ${f.zs}`;
   if (f.antenne) return `Antenne : ${f.antenne}`;
+  if (f.provinces.length > 1) return `Provinces : ${f.provinces.map(prettyName).join(", ")}`;
   return `Province : ${province}`;
+}
+
+function prettyName(p: string): string {
+  const s = (p || "").trim();
+  if (/kasa[iï]/i.test(s) && /central/i.test(s)) return "Kasaï Central";
+  return s.toLowerCase().replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 export function keyOf(r: ASRecord, level: DrillLevel): string {
@@ -85,6 +95,7 @@ export function keyOf(r: ASRecord, level: DrillLevel): string {
     case "antenne": return r.antenne || "—";
     case "zs": return r.zs || "—";
     case "as": return r.as || "—";
+    case "all": return "Total";
   }
 }
 
@@ -241,11 +252,11 @@ export function mapiPour100k(mapi: number, doses: number): number | null {
   return (mapi / doses) * 100000;
 }
 
-/** Totaux du périmètre = agrégat à une seule unité. */
+/** Totaux du périmètre = agrégat à une seule unité (tous niveaux confondus). */
 export function totals(records: ASRecord[]): UnitAgg {
-  const [t] = aggregateByUnit(records, "province");
+  const [t] = aggregateByUnit(records, "all");
   if (t) return { ...t, unit: "Total" };
-  return aggregateByUnit([], "province")[0] ?? emptyUnit();
+  return emptyUnit();
 }
 
 function emptyUnit(): UnitAgg {

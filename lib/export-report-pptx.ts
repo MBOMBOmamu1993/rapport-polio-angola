@@ -113,6 +113,18 @@ function onColor(bg: string): string {
 function slug(s: string): string {
   return s.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 50) || "rapport";
 }
+/**
+ * Vrai si l'unité n'a pas participé au volet polio (campagne RR seule) :
+ * ni cible polio, ni vacciné, ni flacon nVPO2 / VPOb. Ses indicateurs polio
+ * s'affichent alors « — » au lieu de 0.
+ */
+function noPolio(u: UnitAgg): boolean {
+  return (
+    u.nvpo2.cible === 0 && u.nvpo2.vacc === 0 && u.vpob.vacc === 0 &&
+    u.nvpo2.flaconsUtil === 0 && u.vpob.flaconsUtil === 0
+  );
+}
+
 function joinAnd(names: string[]): string {
   if (names.length <= 1) return names.join("");
   return `${names.slice(0, -1).join(", ")} et ${names[names.length - 1]}`;
@@ -152,6 +164,8 @@ export interface ExportOptions {
   /** "download" (navigateur) ou "buffer" (tests Node). */
   output?: "download" | "buffer";
   fileName?: string;
+  /** Libellé de la source de données (remplace la détection par province). */
+  sourceText?: string;
 }
 
 const ASSET_PATHS: Record<string, string> = {
@@ -170,6 +184,9 @@ export async function exportReportPPT(d: ReportData, opts: ExportOptions = {}): 
   pptx.author = "PEV — RD Congo";
   pptx.company = "Programme Élargi de Vaccination";
   pptx.title = `${d.titre} — ${d.scopeLabel}`;
+  dataSource = opts.sourceText ?? (/kasa[iï]/i.test(d.province)
+    ? "Masque de saisie de la campagne (Kasaï Central)"
+    : `DHIS2 — campagne intégrée RR-POLIO (${d.provinceLabel})`);
 
   const loader = opts.loader ?? browserLoader;
   const assets: Record<string, string | null> = {};
@@ -245,7 +262,10 @@ function commentBox(ctx: Ctx, s: PptxGenJS.Slide, comment: string, pos: { x: num
   );
 }
 
-function sourceLine(s: PptxGenJS.Slide, text = "Source : Masque de saisie de la campagne (Kasaï Central)"): void {
+/** Libellé de la source de données (le Kasaï Central importe un masque ; d'autres provinces viennent de DHIS2). */
+let dataSource = "Masque de saisie de la campagne (Kasaï Central)";
+
+function sourceLine(s: PptxGenJS.Slide, text = `Source : ${dataSource}`): void {
   s.addText(text, { x: 0.1, y: H - 0.3, w: 12, h: 0.25, fontSize: 11, color: TITLE_BLUE, fontFace: FONT_TITLE });
 }
 
@@ -490,31 +510,33 @@ function buildPointsSaillants(ctx: Ctx): void {
   const box = (x: number, w: number) => s.addShape(pptx.ShapeType.roundRect, { x, y: 2.78, w, h: 3.94, fill: { color: GREY_LT }, line: { color: "D0D0D0", width: 0.75 }, rectRadius: 0.35, shadow: { type: "outer", blur: 5, offset: 2, angle: 45, color: "9E9E9E", opacity: 0.35 } });
   box(0.55, 6.0);
   s.addText("VACCINATION", { x: 0.82, y: 3.05, w: 3, h: 0.4, fontSize: 18, bold: true, color: BLACK, fontFace: FONT });
-  const vaccRow = (y: number, label: string, v: VaccineAgg) => {
+  // Campagne RR seule sur le périmètre : volet polio affiché « — ».
+  const sansPolio = noPolio(t);
+  const vaccRow = (y: number, label: string, v: VaccineAgg, dash = false) => {
     s.addText(label, { x: 0.6, y, w: 1.05, h: 0.44, fontSize: 20, bold: true, color: NAVY, fontFace: FONT });
     s.addText("Vaccinés", { x: 1.5, y: y + 0.03, w: 1.16, h: 0.37, fontSize: 16, color: GREY, fontFace: FONT });
-    s.addText(fmtInt(v.vacc), { x: 2.5, y, w: 1.5, h: 0.44, fontSize: 18, bold: true, color: "7B2C2C", fontFace: FONT });
+    s.addText(dash ? "—" : fmtInt(v.vacc), { x: 2.5, y, w: 1.5, h: 0.44, fontSize: 18, bold: true, color: "7B2C2C", fontFace: FONT });
     s.addText("Cible", { x: 4.0, y: y + 0.03, w: 0.8, h: 0.37, fontSize: 16, color: GREY, fontFace: FONT });
-    s.addText(fmtInt(v.cible), { x: 4.85, y, w: 1.6, h: 0.44, fontSize: 18, bold: true, color: BLACK, fontFace: FONT });
+    s.addText(dash ? "—" : fmtInt(v.cible), { x: 4.85, y, w: 1.6, h: 0.44, fontSize: 18, bold: true, color: BLACK, fontFace: FONT });
   };
   vaccRow(3.7, "RR", t.rr);
-  vaccRow(4.5, "nVPO2", t.nvpo2);
-  vaccRow(5.3, "VPOb", t.vpob);
+  vaccRow(4.5, "nVPO2", t.nvpo2, sansPolio);
+  vaccRow(5.3, "VPOb", t.vpob, sansPolio);
 
   // Bloc GESTION & MAPI
   box(6.8, 5.95);
   s.addText("GESTION DES VACCINS & MAPI", { x: 7.07, y: 3.05, w: 5, h: 0.4, fontSize: 18, bold: true, color: BLACK, fontFace: FONT });
-  const gestRow = (y: number, label: string, v: VaccineAgg) => {
+  const gestRow = (y: number, label: string, v: VaccineAgg, dash = false) => {
     s.addText(label, { x: 6.9, y, w: 1.0, h: 0.44, fontSize: 20, bold: true, color: NAVY, fontFace: FONT });
     s.addText("Flacons utilisés", { x: 7.8, y: y + 0.03, w: 2.0, h: 0.37, fontSize: 16, color: GREY, fontFace: FONT });
-    s.addText(fmtInt(v.flaconsUtil), { x: 9.45, y, w: 1.45, h: 0.44, fontSize: 18, bold: true, color: "7B2C2C", fontFace: FONT });
+    s.addText(dash ? "—" : fmtInt(v.flaconsUtil), { x: 9.45, y, w: 1.45, h: 0.44, fontSize: 18, bold: true, color: "7B2C2C", fontFace: FONT });
     s.addText("Perte", { x: 11.0, y: y + 0.03, w: 0.76, h: 0.37, fontSize: 16, color: GREY, fontFace: FONT });
     const lc = lossColor(v.tauxPerte);
-    s.addText(fmtPct(v.tauxPerte, 2, "%"), { x: 11.72, y, w: 1.05, h: 0.44, fontSize: 16, bold: true, color: lc === YELLOW ? "B8860B" : lc === NONE ? GREY : lc, fontFace: FONT });
+    s.addText(dash ? "—" : fmtPct(v.tauxPerte, 2, "%"), { x: 11.72, y, w: 1.05, h: 0.44, fontSize: 16, bold: true, color: lc === YELLOW ? "B8860B" : lc === NONE ? GREY : lc, fontFace: FONT });
   };
   gestRow(3.7, "RR", t.rr);
-  gestRow(4.5, "nVPO2", t.nvpo2);
-  gestRow(5.3, "VPOb", t.vpob);
+  gestRow(4.5, "nVPO2", t.nvpo2, sansPolio);
+  gestRow(5.3, "VPOb", t.vpob, sansPolio);
   s.addShape(pptx.ShapeType.roundRect, { x: 7.08, y: 5.85, w: 5.34, h: 0.77, fill: { color: "FFF4E6" }, line: { color: "F4B183", width: 1 }, rectRadius: 0.1 });
   s.addText(
     [
@@ -545,12 +567,14 @@ function syntheseRows(units: UnitAgg[], label: string, dateLancement: string, to
     const base = isTotal ? ttotal(NAVY_DK) : tdNum(zebra(i));
     const name = isTotal ? ttotal(NAVY_DK, { align: "left" }) : td({ bold: true, ...zebra(i) });
     const gr = (v: number) => (isTotal ? ttotal(NAVY_DK) : tdNum({ bold: true, fill: { color: v > 0 ? RED : (i % 2 ? GREY_LT : WHITE) }, color: v > 0 ? WHITE : BLACK }));
+    // Campagne RR seule : le volet polio est sans objet pour cette unité.
+    const sansPolio = noPolio(u);
     return [
       { text: u.unit, options: name },
       { text: dateLancement || "—", options: isTotal ? ttotal(NAVY_DK) : td({ align: "center", ...zebra(i) }) },
       { text: fmtPct(u.completude, 2), options: isTotal ? ttotal(NAVY_DK) : tdColored(u.completude, "cov", { align: "center" }) },
-      { text: fmtInt(u.nvpo2.vacc), options: base },
-      { text: fmtInt(u.vpob.vacc), options: base },
+      { text: sansPolio ? "—" : fmtInt(u.nvpo2.vacc), options: base },
+      { text: sansPolio ? "—" : fmtInt(u.vpob.vacc), options: base },
       { text: fmtInt(u.rr.vacc), options: base },
       { text: fmtNum(u.rr.cv), options: isTotal ? ttotal(NAVY_DK) : tdColored(u.rr.cv, "cov") },
       { text: fmtNum(u.nvpo2.cv), options: isTotal ? ttotal(NAVY_DK) : tdColored(u.nvpo2.cv, "cov") },
@@ -765,8 +789,15 @@ function buildCouverture(ctx: Ctx, k: VaccineKey): void {
   const color = VACC_COLOR[k];
   const cibleLabel = k === "rr" ? "Cible RR" : "Cible Polio";
 
+  // Campagne RR seule sur tout le périmètre : pas de diapositive nVPO2 / VPOb.
+  if (k !== "rr" && noPolio(d.total)) return;
+  // Périmètre mixte (provinces RR seule + RR-POLIO) : le volet polio ne
+  // compare que les unités qui y participent.
+  const antennesK = k === "rr" ? d.antennes : d.antennes.filter((u) => !noPolio(u));
+  const unitsK = k === "rr" ? d.units : d.units.filter((u) => !noPolio(u));
+
   // A. Par antenne : tableau + graphique CV + graphique perte (modèle « par province »).
-  if (d.antennes.length > 1) {
+  if (antennesK.length > 1) {
     const s = pptx.addSlide();
     header(ctx, s, `Résultats Partiels : Couverture vaccinale globale ${name} et taux de perte par Antenne`, { h: 0.77 });
     frame(ctx, s, 0.1, 0.9, 10.2, 6.5, color);
@@ -774,7 +805,7 @@ function buildCouverture(ctx: Ctx, k: VaccineKey): void {
     blockTitle(ctx, s, `Couverture vaccinale ${name} par Antenne`, 0.12, 0.92, 3.3, color, 0.36, 12);
     const rows: PptxGenJS.TableRow[] = [
       ["Antenne", cibleLabel, `Vaccinés ${name}`, `Couv ${name}%`].map((t) => ({ text: t, options: th(color, { fontSize: 9 }) })),
-      ...d.antennes.map((u, i): PptxGenJS.TableRow => [
+      ...antennesK.map((u, i): PptxGenJS.TableRow => [
         { text: u.unit, options: td({ bold: true, fontSize: 9, ...zebra(i) }) },
         { text: fmtInt(u[k].cible), options: tdNum({ fontSize: 9, ...zebra(i) }) },
         { text: fmtInt(u[k].vacc), options: tdNum({ fontSize: 9, ...zebra(i) }) },
@@ -790,18 +821,18 @@ function buildCouverture(ctx: Ctx, k: VaccineKey): void {
     s.addTable(rows, { x: 0.15, y: 1.32, w: 3.25, colW: colW(3.25, [1.1, 0.8, 0.8, 0.7]), border: TABLE_BORDER, rowH: 0.26, valign: "middle", autoPage: false });
     // Graphique CV
     blockTitle(ctx, s, `Répartition de la couverture vaccinale (%) globale de ${name} par Antenne`, 3.5, 0.92, 6.75, color, 0.36, 12);
-    const byCV = [...d.antennes].sort((a, b) => (b[k].cv ?? -1) - (a[k].cv ?? -1));
+    const byCV = [...antennesK].sort((a, b) => (b[k].cv ?? -1) - (a[k].cv ?? -1));
     colChart(ctx, s, { x: 3.5, y: 1.3, w: 6.75, h: 2.7 }, byCV.map((u) => u.unit), byCV.map((u) => r2(u[k].cv)), byCV.map((u) => covColor(u[k].cv)), { valAxisTitle: "Couverture vaccinale Globale", catAxisTitle: "Antenne", min: 0 });
     // Graphique perte
     blockTitle(ctx, s, `Répartition du taux de perte (%) du vaccin ${name} par Antenne`, 0.12, 4.05, 10.13, color, 0.36, 12);
-    const byLoss = [...d.antennes].sort((a, b) => (b[k].tauxPerte ?? -999) - (a[k].tauxPerte ?? -999));
+    const byLoss = [...antennesK].sort((a, b) => (b[k].tauxPerte ?? -999) - (a[k].tauxPerte ?? -999));
     colChart(ctx, s, { x: 0.15, y: 4.45, w: 10.1, h: 2.3 }, byLoss.map((u) => u.unit), byLoss.map((u) => r2(u[k].tauxPerte)), byLoss.map((u) => lossColor(u[k].tauxPerte)), { valAxisTitle: "Taux de perte", catAxisTitle: "Antenne" });
     legendsBottom(ctx, s, 6.83, 0.1, 10.2, true, true, false);
-    commentBox(ctx, s, couvComment(d, k, d.antennes, "Antenne"), { x: 10.4, y: 0.9, w: 2.85, h: 6.5 });
+    commentBox(ctx, s, couvComment(d, k, antennesK, "Antenne"), { x: 10.4, y: 0.9, w: 2.85, h: 6.5 });
   }
 
   // B. Par unité (ZS/AS) : deux graphiques (CV, perte) — modèle « par antenne ».
-  const units = d.units;
+  const units = unitsK;
   const per = 30;
   const byCV = [...units].sort((a, b) => (b[k].cv ?? -1) - (a[k].cv ?? -1));
   const byLoss = [...units].sort((a, b) => (a[k].tauxPerte ?? -999) - (b[k].tauxPerte ?? -999));
@@ -1035,11 +1066,29 @@ function pctParts(vals: number[]): number[] {
   return vals.map((v) => (s > 0 ? Math.round((v / s) * 10000) / 100 : 0));
 }
 
+/** Panneau neutre quand le périmètre est en campagne RR seule (pas de volet polio). */
+function noPolioPanel(ctx: Ctx, s: PptxGenJS.Slide, pos: { x: number; y: number; w: number; h: number }, k: VaccineKey, titre: string): boolean {
+  if (k === "rr" || !noPolio(ctx.d.total)) return false;
+  frame(ctx, s, pos.x, pos.y, pos.w, pos.h, VACC_COLOR[k]);
+  blockTitle(ctx, s, titre, pos.x, pos.y, pos.w, VACC_COLOR[k], 0.32, 11);
+  s.addText("Campagne RR seule sur ce périmètre — volet polio sans objet.", {
+    x: pos.x, y: pos.y + 0.4, w: pos.w, h: pos.h - 0.5, align: "center", valign: "middle", fontSize: 12, italic: true, color: GREY, fontFace: FONT,
+  });
+  return true;
+}
+
 function agePanel(ctx: Ctx, s: PptxGenJS.Slide, pos: { x: number; y: number; w: number; h: number }, k: VaccineKey, units: UnitAgg[]): void {
   const { pptx, d } = ctx;
   const color = VACC_COLOR[k];
-  const labels = k === "rr" ? RR_AGE_LABELS : POLIO_AGE_LABELS;
-  const tot = d.total[k].ages;
+  if (noPolioPanel(ctx, s, pos, k, `Proportion des enfants vaccinés en ${VACCINE_LABELS[k]} par tranche d'âge`)) return;
+  const allLabels = k === "rr" ? RR_AGE_LABELS : POLIO_AGE_LABELS;
+  const totAll = d.total[k].ages;
+  // Toutes les provinces ne vaccinent pas toutes les tranches (Maniema : polio
+  // 0-59 mois, sans 5-9 ans) : les tranches vides en fin de liste sont masquées.
+  let nAges = allLabels.length;
+  while (nAges > 1 && (totAll[nAges - 1] ?? 0) === 0) nAges--;
+  const labels = allLabels.slice(0, nAges);
+  const tot = totAll.slice(0, nAges);
   frame(ctx, s, pos.x, pos.y, pos.w, pos.h, color);
   blockTitle(ctx, s, `Proportion des enfants vaccinés en ${VACCINE_LABELS[k]} par tranche d'âge : Globale et par ${d.byUnitLabel}`, pos.x, pos.y, pos.w, color, 0.32, 11);
   // Légende
@@ -1060,7 +1109,7 @@ function agePanel(ctx: Ctx, s: PptxGenJS.Slide, pos: { x: number; y: number; w: 
   }
   const withData = units.filter((u) => u[k].vacc > 0);
   const cats = withData.length ? withData : units.slice(0, 12);
-  const series = labels.map((l, i) => ({ name: `% ${l}`, labels: cats.map((u) => u.unit), values: cats.map((u) => pctParts(u[k].ages)[i]) }));
+  const series = labels.map((l, i) => ({ name: `% ${l}`, labels: cats.map((u) => u.unit), values: cats.map((u) => pctParts(u[k].ages.slice(0, nAges))[i]) }));
   s.addChart(pptx.ChartType.bar, series, {
     x: pos.x + pos.w * 0.39, y: pos.y + 0.36, w: pos.w * 0.6, h: pos.h - 0.4,
     barDir: "col", barGrouping: "stacked", chartColors: AGE_COLORS.slice(0, labels.length),
@@ -1103,6 +1152,7 @@ function buildAges(ctx: Ctx): void {
 function sexPanel(ctx: Ctx, s: PptxGenJS.Slide, pos: { x: number; y: number; w: number; h: number }, k: VaccineKey, units: UnitAgg[]): void {
   const { pptx, d } = ctx;
   const color = VACC_COLOR[k];
+  if (noPolioPanel(ctx, s, pos, k, `Proportion des enfants vaccinés en ${VACCINE_LABELS[k]} par Sexe`)) return;
   const t = d.total[k];
   frame(ctx, s, pos.x, pos.y, pos.w, pos.h, color);
   blockTitle(ctx, s, `Proportion des enfants vaccinés en ${VACCINE_LABELS[k]} par Sexe et par ${d.byUnitLabel}`, pos.x, pos.y, pos.w, color, 0.32, 11);
@@ -1242,9 +1292,9 @@ function buildSupervision(ctx: Ctx): void {
     // Tableau des taux
     const t = d.total;
     const head: PptxGenJS.TableRow = ["Taux de couverture RR", "Taux de couverture nVPO2", "Taux de couverture VPOb", "Taux de complétude"].map((h) => ({ text: h, options: th(TITLE_BLUE, { fontSize: 12, fontFace: FONT_TITLE }) }));
-    const val = (v: number | null): PptxGenJS.TableCell => ({ text: fmtPct(v, 0, "%"), options: td({ fontSize: 16, bold: true, align: "center", fontFace: FONT_TITLE, fill: { color: (v ?? 0) < 80 ? "F4CCCC" : "D9EAD3" } }) });
+    const val = (v: number | null): PptxGenJS.TableCell => ({ text: fmtPct(v, 0, "%"), options: td({ fontSize: 16, bold: true, align: "center", fontFace: FONT_TITLE, fill: { color: v == null ? GREY_LT : v < 80 ? "F4CCCC" : "D9EAD3" } }) });
     s.addTable([head, [val(t.rr.cv), val(t.nvpo2.cv), val(t.vpob.cv), val(t.completude)]], { x: 0.45, y: 5.84, w: W - 0.9, colW: colW(W - 0.9, [1, 1, 1, 1]), border: { type: "solid", color: BLACK, pt: 0.75 }, rowH: 0.5, valign: "middle", autoPage: false });
-    s.addText("Source : 1. ODK, 2. Masque de saisie de la campagne", { x: 0.13, y: 7.05, w: 12, h: 0.3, fontSize: 11, color: TITLE_BLUE, fontFace: FONT_TITLE });
+    s.addText(`Source : 1. ODK, 2. ${dataSource}`, { x: 0.13, y: 7.05, w: 12, h: 0.3, fontSize: 11, color: TITLE_BLUE, fontFace: FONT_TITLE });
   }
 
   // C. Détail par ZS (tableau) — supervisions, AS visitées, score.

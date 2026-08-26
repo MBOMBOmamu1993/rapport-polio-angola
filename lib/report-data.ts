@@ -243,13 +243,18 @@ export interface BuildReportInput {
   actionsPC: ActionPCRow[];
   problemes?: ProblemeRow[];
   dateLancement?: string;
+  /** Titre du rapport (par défaut : titre Kasaï Central). */
+  titre?: string;
   now?: Date;
 }
 
 export function buildReportData(inp: BuildReportInput): ReportData {
   const { data, filters } = inp;
   const filtered = applyFilters(data, filters);
-  const drill = resolveDrillLevel(filters);
+  const provincesInScope = Array.from(new Set(filtered.map((r) => r.province))).sort((a, b) =>
+    a.localeCompare(b, "fr")
+  );
+  const drill = resolveDrillLevel(filters, provincesInScope.length > 1);
   const units = aggregateByUnit(filtered, drill.level);
   const antennesAll = aggregateByUnit(filtered, "antenne");
   const antennes = antennesAll.length > 1 ? antennesAll : [];
@@ -279,19 +284,27 @@ export function buildReportData(inp: BuildReportInput): ReportData {
 
   const now = inp.now ?? new Date();
   const dateMaj = `${String(now.getDate()).padStart(2, "0")}/${String(now.getMonth() + 1).padStart(2, "0")}/${now.getFullYear()}`;
-  const provinceLabel = prettyProvince(filters.provinces[0] || data.meta.province);
+  const multiProvince = provincesInScope.length > 1;
+  const provinceLabel = multiProvince
+    ? "RD Congo"
+    : prettyProvince(provincesInScope[0] || filters.provinces[0] || data.meta.province);
+  const provincesList = provincesInScope.map(prettyProvince);
   const coverEntity =
     filters.as ? `Aire de Santé : ${filters.as}` :
     filters.zs ? `Zone de Santé : ${filters.zs}` :
     filters.antenne ? `Antenne : ${filters.antenne}` :
-    `Province du ${provinceLabel}`;
+    multiProvince
+      ? (provincesList.length <= 5
+          ? `Provinces : ${provincesList.join(", ")}`
+          : `RD Congo — ${provincesList.length} provinces`)
+      : `Province du ${provinceLabel}`;
   const dateLancement = inp.dateLancement || data.meta.dateDebut || "";
   const jl = data.meta.jourLabels;
   const periodeJours = jl.length ? (jl.length === 1 ? jl[0] : `${jl[0]} → ${jl[jl.length - 1]}`) : "";
 
   return {
-    titre: REPORT_TITLE,
-    province: filters.provinces[0] || data.meta.province,
+    titre: inp.titre ?? REPORT_TITLE,
+    province: provincesInScope[0] || filters.provinces[0] || data.meta.province,
     provinceLabel,
     scopeLabel: scopeLabel(filters, provinceLabel),
     coverEntity,

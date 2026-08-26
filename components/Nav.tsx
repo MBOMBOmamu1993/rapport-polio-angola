@@ -8,6 +8,7 @@ import { clsx } from "clsx";
 const links = [
   { href: "/import", label: "Importer le masque de saisie", icon: "📥" },
   { href: "/rapport", label: "Télécharger le rapport", icon: "📊" },
+  { href: "/dhis2", label: "RR-polio DHIS2 Bloc 3", icon: "🌍" },
 ];
 
 export function Nav() {

@@ -103,8 +103,26 @@ const TTL_MS = 5 * 60 * 1000;
 /** Délai maximal accordé au serveur ODK (il peut mettre plusieurs minutes). */
 const ODK_TIMEOUT_MS = 280_000;
 
-function cacheKey(cfg: ReturnType<typeof odkConfig>, dateMin: string): string {
-  return `${cfg.formId}|${cfg.province}|${dateMin}`;
+function cacheKey(cfg: ReturnType<typeof odkConfig>, dateMin: string, province: string): string {
+  return `${cfg.formId}|${province}|${dateMin}`;
+}
+
+/**
+ * Variantes d'orthographe du champ « Province » du formulaire (les saisies ODK
+ * mélangent « Kasai_Central », « Maniema », parfois espaces ou tirets) : la
+ * requête utilise un `$in` pour les absorber toutes.
+ */
+function provinceCandidates(p: string): string[] {
+  const base = (p || "").trim();
+  const noAccent = base.normalize("NFD").replace(/[̀-ͯ]/g, "");
+  const forms = new Set<string>();
+  for (const b of [base, noAccent]) {
+    forms.add(b);
+    forms.add(b.replace(/[\s-]+/g, "_"));
+    forms.add(b.replace(/[_-]+/g, " "));
+    forms.add(b.replace(/[\s_]+/g, "-"));
+  }
+  return Array.from(forms).filter(Boolean);
 }
 function resolveDateMin(cfg: ReturnType<typeof odkConfig>, dateMin?: string): string {
   return /^\d{4}-\d{2}-\d{2}$/.test(dateMin ?? "") ? (dateMin as string) : cfg.dateMin;
@@ -130,9 +148,10 @@ const FETCH_BUDGET_MS = 240_000;
  * (`partial: true`, curseur avancé) et l'exécution suivante reprend là.
  * Les pages sont fusionnées par `_id` avec les enregistrements déjà connus.
  */
-async function refreshFromOdk(dateMin: string): Promise<SupervisionPayload> {
+async function refreshFromOdk(dateMin: string, province?: string): Promise<SupervisionPayload> {
   const cfg = odkConfig();
-  const key = cacheKey(cfg, dateMin);
+  const prov = (province || cfg.province).trim();
+  const key = cacheKey(cfg, dateMin, prov);
   const running = inflight.get(key);
   if (running) return running;
   const job = (async () => {
@@ -144,7 +163,7 @@ async function refreshFromOdk(dateMin: string): Promise<SupervisionPayload> {
         (Number.isFinite(prevAt) ? new Date(prevAt - INCREMENTAL_MARGIN_MS).toISOString().slice(0, 19) : null)
       : null;
     const query = JSON.stringify({
-      "group_identification/Province": cfg.province,
+      "group_identification/Province": { $in: provinceCandidates(prov) },
       "group_identification/date_supervision": { $gte: dateMin },
       ...(since ? { _submission_time: { $gte: since } } : {}),
     });
@@ -190,7 +209,7 @@ async function refreshFromOdk(dateMin: string): Promise<SupervisionPayload> {
       ok: true,
       fetchedAt: new Date().toISOString(),
       dateMin,
-      province: cfg.province,
+      province: prov,
       formId: cfg.formId,
       formTitle: DEFAULTS.formTitle,
       total: records.length,
@@ -226,11 +245,12 @@ export interface SupervisionLookup {
  * pour ce formulaire) : l'appel réseau est fait en arrière‑plan et le client
  * interroge à nouveau la route jusqu'à obtenir les données.
  */
-export async function lookupSupervision(opts: { dateMin?: string; force?: boolean } = {}): Promise<SupervisionLookup> {
+export async function lookupSupervision(opts: { dateMin?: string; force?: boolean; province?: string } = {}): Promise<SupervisionLookup> {
   const cfg = odkConfig();
   const dateMin = resolveDateMin(cfg, opts.dateMin);
-  const key = cacheKey(cfg, dateMin);
-  const refresh = () => refreshFromOdk(dateMin);
+  const prov = (opts.province || cfg.province).trim();
+  const key = cacheKey(cfg, dateMin, prov);
+  const refresh = () => refreshFromOdk(dateMin, prov);
   if (!opts.force && cache && cache.key === key && Date.now() - cache.at < TTL_MS) {
     // Extraction partielle : servir ce qu'on a mais poursuivre le rattrapage.
     return { payload: cache.payload, needsRefresh: Boolean(cache.payload.partial), refresh };
@@ -245,7 +265,7 @@ export async function lookupSupervision(opts: { dateMin?: string; force?: boolea
 }
 
 /** Récupère les supervisions (attend l'appel ODK si nécessaire) — scripts / tests. */
-export async function fetchSupervision(opts: { dateMin?: string; force?: boolean } = {}): Promise<SupervisionPayload> {
+export async function fetchSupervision(opts: { dateMin?: string; force?: boolean; province?: string } = {}): Promise<SupervisionPayload> {
   const l = await lookupSupervision(opts);
   if (l.payload && !l.needsRefresh) return l.payload;
   try {
