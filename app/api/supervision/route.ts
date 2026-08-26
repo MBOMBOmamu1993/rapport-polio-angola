@@ -1,6 +1,8 @@
+import { gunzipSync } from "node:zlib";
 import { NextRequest, NextResponse } from "next/server";
 import { waitUntil } from "@vercel/functions";
-import { lookupSupervision } from "@/lib/odk-server";
+import { lookupSupervision, seedSupervision } from "@/lib/odk-server";
+import type { SupervisionPayload } from "@/lib/odk-supervision";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,5 +39,27 @@ export async function GET(req: NextRequest) {
       { ok: false, reason: e instanceof Error ? e.message : "error", records: [], total: 0 },
       { status: 502 }
     );
+  }
+}
+
+/**
+ * Injection d'une extraction ODK figée (campagne terminée) — administration.
+ * POST /api/supervision avec l'en-tête `x-seed-code` (ODK_SEED_CODE) et pour
+ * corps le JSON SupervisionPayload, éventuellement gzippé.
+ */
+export async function POST(req: NextRequest) {
+  const code = req.headers.get("x-seed-code") ?? "";
+  const expected = process.env.ODK_SEED_CODE || "";
+  if (!expected || code !== expected) {
+    return NextResponse.json({ ok: false, reason: "non autorisé" }, { status: 401 });
+  }
+  try {
+    const buf = Buffer.from(await req.arrayBuffer());
+    const text = buf.length > 2 && buf[0] === 0x1f && buf[1] === 0x8b ? gunzipSync(buf).toString("utf8") : buf.toString("utf8");
+    const payload = JSON.parse(text) as SupervisionPayload;
+    const res = await seedSupervision(payload);
+    return NextResponse.json({ ok: true, ...res });
+  } catch (e) {
+    return NextResponse.json({ ok: false, reason: e instanceof Error ? e.message : "erreur" }, { status: 400 });
   }
 }

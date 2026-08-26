@@ -288,3 +288,28 @@ export async function fetchSupervision(opts: { dateMin?: string; force?: boolean
     throw e;
   }
 }
+
+/**
+ * Injecte une extraction ODK complète (téléchargée hors ligne) dans le cache
+ * mémoire + KV, sous la clé canonique. Utilisé par la route d'administration
+ * POST /api/supervision : la campagne est terminée, les données sont figées.
+ */
+export async function seedSupervision(payload: SupervisionPayload): Promise<{ key: string; total: number }> {
+  const cfg = odkConfig();
+  if (!payload?.ok || !Array.isArray(payload.records) || payload.records.length === 0) {
+    throw new Error("payload invalide (ok/records)");
+  }
+  if (payload.formId !== cfg.formId) throw new Error(`formulaire inattendu (${payload.formId} ≠ ${cfg.formId})`);
+  if (!payload.province || !/^\d{4}-\d{2}-\d{2}$/.test(payload.dateMin ?? "")) {
+    throw new Error("payload invalide (province/dateMin)");
+  }
+  const key = cacheKey(cfg, payload.dateMin, payload.province);
+  const frozen: SupervisionPayload = { ...payload };
+  delete frozen.partial;
+  delete frozen.stale;
+  cache = { key, at: Date.now(), payload: frozen };
+  await kvSetJSON(`rrpolio:odk:${key}`, frozen);
+  const check = await kvGetJSON<SupervisionPayload>(`rrpolio:odk:${key}`);
+  if (!check?.ok || check.total !== frozen.total) throw new Error("écriture KV non vérifiée");
+  return { key, total: frozen.total };
+}
