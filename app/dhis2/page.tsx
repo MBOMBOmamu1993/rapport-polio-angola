@@ -195,7 +195,8 @@ export default function Dhis2Page() {
     setSupError(undefined);
     const qs = new URLSearchParams({ province: supProvince, dateMin: supDateMin });
     if (force) qs.set("force", "1");
-    const deadline = Date.now() + 6 * 60 * 1000;
+    // Première extraction d'une province : le serveur ODK peut prendre très longtemps.
+    const deadline = Date.now() + 12 * 60 * 1000;
     try {
       for (;;) {
         const res = await fetch(`/api/supervision?${qs.toString()}`, { cache: "no-store" });
@@ -287,9 +288,15 @@ export default function Dhis2Page() {
         selectedBlocks.length >= 4 && !sub.antenne && !sub.zs && !sub.as
           ? `Resultats_Partiels_Campagne_integree_Bloc3_Aout_2026_J1-J5_${rep.dateMaj.replace(/\//g, "-")}.pptx`
           : undefined;
+      const hasMasque = selectedBlocks.some((b) => b.source === "masque");
+      const hasDhis2 = selectedBlocks.some((b) => b.source !== "masque");
       await exportReportPPT(rep, {
         fileName,
-        sourceText: "DHIS2 de campagne (rdccampagne.hispwca.org) — dataset PEV_Campagne RR et Polio",
+        sourceText: hasMasque && hasDhis2
+          ? "DHIS2 de campagne (rdccampagne.hispwca.org) + masque de saisie importé (Kasaï Central)"
+          : hasMasque
+            ? "Masque de saisie de la campagne (dernier import)"
+            : "DHIS2 de campagne (rdccampagne.hispwca.org) — dataset PEV_Campagne RR et Polio",
       });
       setDone(`Rapport généré (${new Date().toLocaleTimeString("fr-FR")}).`);
     } catch (e) {
@@ -379,8 +386,9 @@ export default function Dhis2Page() {
                       {on ? "☑" : "☐"} {prettyProvince(p.name)}
                     </span>
                     <span className="block text-[11px] text-surface-400">
-                      Cible RR {fmtInt(p.cibleRR)} · {fmtInt(p.rrVacc)} vaccinés RR
-                      {on && b ? ` · J1 ${fmtDateFR(b.j1)} · ${fmtInt(b.records.length)} AS` : ""}
+                      {on && b?.source === "masque"
+                        ? `Résultats du dernier masque importé · J1 ${fmtDateFR(b.j1)} · ${fmtInt(b.records.length)} AS`
+                        : <>Cible RR {fmtInt(p.cibleRR)} · {fmtInt(p.rrVacc)} vaccinés RR{on && b ? ` · J1 ${fmtDateFR(b.j1)} · ${fmtInt(b.records.length)} AS` : ""}</>}
                       {err ? ` · ⚠️ ${err}` : ""}
                     </span>
                   </span>

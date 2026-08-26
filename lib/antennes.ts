@@ -532,7 +532,21 @@ export function normZS(s: string): string {
   return (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
+/**
+ * Homonymies de ZS entre provinces : le referentiel national est plat, une ZS
+ * portant le meme nom qu'une ZS d'une autre province heriterait de la mauvaise
+ * antenne (ex. Lubunga existe au Kasai Central ET a Kisangani/Tshopo).
+ * Cle = `norm(province)|norm(zs)`, valeur = antenne correcte (source : masque).
+ */
+const OVERRIDES: Record<string, string> = {
+  "KASAICENTRAL|LUBUNGA": "Kananga",
+};
+
 /** Antenne PEV d'une ZS (nom deja nettoye) ; repli = la ZS elle-meme. */
-export function antenneForZS(zsName: string): string {
+export function antenneForZS(zsName: string, provinceName?: string): string {
+  if (provinceName) {
+    const o = OVERRIDES[`${normZS(provinceName)}|${normZS(zsName)}`];
+    if (o) return o;
+  }
   return ZS_ANTENNE[normZS(zsName)] ?? zsName;
 }

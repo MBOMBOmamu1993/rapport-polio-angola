@@ -44,6 +44,12 @@ export interface ProvinceBlock {
   j1: string;
   /** Vrai si la province a intégré le volet polio. */
   polio: boolean;
+  /**
+   * Origine des résultats : "dhis2" (extraction analytics) ou "masque"
+   * (dernier masque de saisie importé — prioritaire quand la province saisit
+   * ses résultats dans le masque et non dans DHIS2, ex. Kasaï Central).
+   */
+  source?: "dhis2" | "masque";
   records: ASRecord[];
   /** Marqué par l'API quand la valeur servie provient d'un cache antérieur. */
   stale?: boolean;

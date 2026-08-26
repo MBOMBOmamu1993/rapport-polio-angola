@@ -103,25 +103,44 @@ const TTL_MS = 5 * 60 * 1000;
 /** Délai maximal accordé au serveur ODK (il peut mettre plusieurs minutes). */
 const ODK_TIMEOUT_MS = 280_000;
 
+/**
+ * Forme canonique du nom de province, identique à la valeur du formulaire ODK
+ * (« Kasai_Central ») : sans accents, mots en capitale initiale, séparés par
+ * « _ ». Elle sert de clé de cache : « KASAI-CENTRAL » (masque), « Kasai
+ * Central » (DHIS2) et « Kasai_Central » (env) partagent la même extraction.
+ */
+export function canonicalProvince(p: string): string {
+  return (p || "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .trim()
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((w) => w[0].toUpperCase() + w.slice(1).toLowerCase())
+    .join("_");
+}
+
 function cacheKey(cfg: ReturnType<typeof odkConfig>, dateMin: string, province: string): string {
-  return `${cfg.formId}|${province}|${dateMin}`;
+  return `${cfg.formId}|${canonicalProvince(province)}|${dateMin}`;
 }
 
 /**
  * Variantes d'orthographe du champ « Province » du formulaire (les saisies ODK
- * mélangent « Kasai_Central », « Maniema », parfois espaces ou tirets) : la
- * requête utilise un `$in` pour les absorber toutes.
+ * mélangent « Kasai_Central », « Maniema », parfois espaces, tirets ou
+ * majuscules) : la requête utilise un `$in` pour les absorber toutes.
  */
 function provinceCandidates(p: string): string[] {
-  const base = (p || "").trim();
-  const noAccent = base.normalize("NFD").replace(/[̀-ͯ]/g, "");
-  const forms = new Set<string>();
-  for (const b of [base, noAccent]) {
-    forms.add(b);
-    forms.add(b.replace(/[\s-]+/g, "_"));
-    forms.add(b.replace(/[_-]+/g, " "));
-    forms.add(b.replace(/[\s_]+/g, "-"));
-  }
+  const canon = canonicalProvince(p);
+  const spaced = canon.replace(/_/g, " ");
+  const forms = new Set<string>([
+    (p || "").trim(),
+    canon,
+    spaced,
+    canon.replace(/_/g, "-"),
+    canon.toUpperCase(),
+    spaced.toUpperCase(),
+    spaced.toLowerCase(),
+  ]);
   return Array.from(forms).filter(Boolean);
 }
 function resolveDateMin(cfg: ReturnType<typeof odkConfig>, dateMin?: string): string {

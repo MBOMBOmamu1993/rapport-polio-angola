@@ -238,7 +238,7 @@ export async function buildProvinceBlock(provinceId: string): Promise<ProvinceBl
     if (u.level !== 4) continue;
     const zs = zsName.get(u.parent?.id ?? "") ?? "—";
     records.set(u.id, {
-      province: provName, antenne: antenneForZS(zs), zs, as: cleanName(u.name),
+      province: provName, antenne: antenneForZS(zs, provName), zs, as: cleanName(u.name),
       popTotale: 0, menagesPrevus: 0, menagesVisites: 0, mosoAttendus: 0, mosoRecus: 0,
       pers15: 0, refusSignales: 0, refusGeres: 0,
       vaccAttendus: NB_JOURS, vaccRecus: 0,
