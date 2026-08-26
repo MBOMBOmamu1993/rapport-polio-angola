@@ -262,15 +262,17 @@ export async function lookupSupervision(opts: { dateMin?: string; force?: boolea
   const prov = (opts.province || cfg.province).trim();
   const key = cacheKey(cfg, dateMin, prov);
   const refresh = () => refreshFromOdk(dateMin, prov);
-  if (!opts.force && cache && cache.key === key && Date.now() - cache.at < TTL_MS) {
-    // Extraction partielle : servir ce qu'on a mais poursuivre le rattrapage.
+  // CAMPAGNE TERMINÉE (fin août 2026) : les extractions ODK complètes sont
+  // FIGÉES — plus aucune resynchronisation automatique avec le serveur ODK.
+  // Seuls relancent une extraction : un cache absent, une extraction restée
+  // partielle, ou un rafraîchissement explicitement forcé (bouton Actualiser).
+  if (!opts.force && cache && cache.key === key) {
     return { payload: cache.payload, needsRefresh: Boolean(cache.payload.partial), refresh };
   }
   const saved = cache && cache.key === key ? cache.payload : await kvGetJSON<SupervisionPayload>(`rrpolio:odk:${key}`);
   if (saved?.ok) {
     if (!cache || cache.key !== key) cache = { key, at: Date.parse(saved.fetchedAt) || 0, payload: saved };
-    const ageMs = Date.now() - (Date.parse(saved.fetchedAt) || 0);
-    return { payload: { ...saved, stale: ageMs > TTL_MS }, needsRefresh: opts.force || ageMs > TTL_MS || Boolean(saved.partial), refresh };
+    return { payload: saved, needsRefresh: opts.force || Boolean(saved.partial), refresh };
   }
   return { payload: null, needsRefresh: true, refresh };
 }
