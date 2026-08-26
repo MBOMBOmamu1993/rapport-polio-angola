@@ -622,8 +622,12 @@ function buildSynthese(ctx: Ctx): void {
       legendsBottom(ctx, s, 6.78, 3.75, W - 3.9, true, true, true);
     });
   };
-  if (d.antennes.length > 1) draw(syntheseRows(d.antennes, "Antenne", d.dateLancement, d.total), "Antenne", 15);
-  draw(syntheseRows(d.units, d.byUnitLabel, d.dateLancement, d.total), d.byUnitLabel, 15);
+  // Ordre du modèle national Bloc 3 : les résultats PAR PROVINCE d'abord,
+  // puis PAR ANTENNE. Aux autres niveaux, la vue Antenne reste en tête.
+  const provinceFirst = d.byUnitLabel === "Province";
+  const drawAntennes = () => { if (d.antennes.length > 1) draw(syntheseRows(d.antennes, "Antenne", d.dateLancement, d.total), "Antenne", 15); };
+  const drawUnits = () => draw(syntheseRows(d.units, d.byUnitLabel, d.dateLancement, d.total), d.byUnitLabel, 15);
+  if (provinceFirst) { drawUnits(); drawAntennes(); } else { drawAntennes(); drawUnits(); }
 }
 
 function syntheseComment(d: ReportData, label: string): string {
@@ -707,6 +711,9 @@ function buildCompletude(ctx: Ctx): void {
   const nCols = 4 + jours.length * 2;
   const weights = [1.5, 0.8, ...jours.flatMap(() => [0.7, 0.75]), 0.75, 0.8];
 
+  // Ordre du modèle national : par Province d'abord, puis par Antenne.
+  const provinceFirst = d.byUnitLabel === "Province";
+  const drawAntennes = () => {
   // A. Par antenne : tableau (paginé si beaucoup d'antennes) + graphique sur la
   //    même diapo quand il reste de la place, sinon sur sa propre diapo — un
   //    graphique de hauteur négative corrompait le fichier à partir de ~15 antennes.
@@ -750,7 +757,10 @@ function buildCompletude(ctx: Ctx): void {
     }
   }
 
-  // B. Par unité (ZS/AS) : tableau journalier paginé.
+  };
+
+  const drawUnits = () => {
+  // B. Par unité (Province/ZS/AS) : tableau journalier paginé.
   const rowsAll = completudeTable(d.units, d.byUnitLabel, jours, d.total);
   const head = rowsAll[0];
   const body = rowsAll.slice(1, -1);
@@ -779,6 +789,9 @@ function buildCompletude(ctx: Ctx): void {
     commentBox(ctx, s, completudeComment(d, d.units, d.byUnitLabel), { x: 0.05, y: 6.72, w: W - 0.1, h: 0.5 });
     sourceLine(s);
   }
+  };
+
+  if (provinceFirst) { drawUnits(); drawAntennes(); } else { drawAntennes(); drawUnits(); }
 }
 
 /* ─── 7‑9. Couverture vaccinale + taux de perte ────────────────────────── */
@@ -825,6 +838,8 @@ function buildCouverture(ctx: Ctx, k: VaccineKey): void {
   const antennesK = k === "rr" ? d.antennes : d.antennes.filter((u) => !noPolio(u));
   const unitsK = k === "rr" ? d.units : d.units.filter((u) => !noPolio(u));
 
+  const provinceFirst = d.byUnitLabel === "Province";
+  const drawAntennes = () => {
   // A. Par antenne : tableau + graphique CV + graphique perte (modèle « par province »).
   //    Au-delà de 8 antennes, le tableau déborderait sur les graphiques : il est
   //    alors paginé sur ses propres diapos et les graphiques suivent à part.
@@ -883,7 +898,10 @@ function buildCouverture(ctx: Ctx, k: VaccineKey): void {
     }
   }
 
-  // B. Par unité (ZS/AS) : deux graphiques (CV, perte) — modèle « par antenne ».
+  };
+
+  const drawUnits = () => {
+  // B. Par unité (Province/ZS/AS) : deux graphiques (CV, perte).
   const units = unitsK;
   const per = 30;
   const byCV = [...units].sort((a, b) => (b[k].cv ?? -1) - (a[k].cv ?? -1));
@@ -902,6 +920,9 @@ function buildCouverture(ctx: Ctx, k: VaccineKey): void {
     legendsBottom(ctx, s, 6.83, 0.05, 10.35, true, true, false);
     commentBox(ctx, s, couvComment(d, k, units, d.byUnitLabel), { x: 10.5, y: 0.62, w: 2.75, h: 6.75 });
   }
+  };
+
+  if (provinceFirst) { drawUnits(); drawAntennes(); } else { drawAntennes(); drawUnits(); }
 }
 
 /* ─── 10. MAPI ─────────────────────────────────────────────────────────── */
@@ -1081,6 +1102,8 @@ function buildRecup(ctx: Ctx): void {
     return y + 0.45 + 0.27 * rows.length + 0.15;
   };
 
+  const provinceFirst = d.byUnitLabel === "Province";
+  const drawAntennes = () => {
   // A. Vue par antenne : récupérés, identifiés et % de récupération sur une diapo.
   //    Au-delà de 6 antennes, les trois tableaux empilés déborderaient : chaque
   //    tableau passe alors sur sa propre diapo (paginée).
@@ -1095,10 +1118,10 @@ function buildRecup(ctx: Ctx): void {
     commentBox(ctx, s, recupComment(d), { x: 0.05, y: 6.05, w: W - 0.1, h: 0.85 });
     sourceLine(s);
   } else if (d.antennes.length > 6) {
-    const sections: { sel: Sel; isPct: boolean; title: string }[] = [
-      { sel: selRecup, isPct: false, title: "1. Données de récupération des enfants au PEV de routine par Antenne (récupérés)" },
-      { sel: selIdent, isPct: false, title: "2. Enfants et femmes enceintes identifiés pour récupération par Antenne" },
-      { sel: selPct, isPct: true, title: "3. Taux de récupération (récupérés ÷ identifiés) par Antenne" },
+    const sections: { sel: Sel; isPct: boolean; court: string; title: string }[] = [
+      { sel: selRecup, isPct: false, court: "récupérés", title: "1. Données de récupération des enfants au PEV de routine par Antenne (récupérés)" },
+      { sel: selIdent, isPct: false, court: "identifiés", title: "2. Enfants et femmes enceintes identifiés pour récupération par Antenne" },
+      { sel: selPct, isPct: true, court: "taux de récupération", title: "3. Taux de récupération (récupérés ÷ identifiés) par Antenne" },
     ];
     for (const sec of sections) {
       const all = rowsFor(d.antennes, "Antenne", sec.sel, sec.isPct);
@@ -1108,7 +1131,7 @@ function buildRecup(ctx: Ctx): void {
       const pagesA = chunk(b0, 15);
       pagesA.forEach((page, idx) => {
         const s = pptx.addSlide();
-        header(ctx, s, `Résultats Partiels : Récupération PEV de routine par Antenne${suite(idx, pagesA.length)}`, { h: 0.49 });
+        header(ctx, s, `Résultats Partiels : Récupération PEV de routine par Antenne — ${sec.court}${suite(idx, pagesA.length)}`, { h: 0.49 });
         frame(ctx, s, 0.05, 0.6, W - 0.1, 5.35, MAPI_BLUE);
         const rows = idx === pagesA.length - 1 ? [h0, ...page, t0] : [h0, ...page];
         drawTable(s, rows, 0.62, sec.title);
@@ -1118,7 +1141,10 @@ function buildRecup(ctx: Ctx): void {
     }
   }
 
-  // B. Vue par unité (ZS/AS) : récupérés (paginé).
+  };
+
+  const drawUnits = () => {
+  // B. Vue par unité (Province/ZS/AS) : récupérés (paginé).
   const all = rowsFor(d.units, d.byUnitLabel, selRecup);
   const head = all[0];
   const body = all.slice(1, -1);
@@ -1133,6 +1159,9 @@ function buildRecup(ctx: Ctx): void {
     commentBox(ctx, s, recupComment(d), { x: 0.05, y: 6.05, w: W - 0.1, h: 0.85 });
     sourceLine(s);
   });
+  };
+
+  if (provinceFirst) { drawUnits(); drawAntennes(); } else { drawAntennes(); drawUnits(); }
 }
 
 /* ─── 13. Tranches d'âge ───────────────────────────────────────────────── */
