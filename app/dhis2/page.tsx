@@ -15,7 +15,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { applyFilters, cascadeOptions, resolveDrillLevel, totals } from "@/lib/analytics";
 import { fmtInt, fmtPct } from "@/lib/format";
 import { mergeBlocks, type ProvinceBlock, type ProvinceInfo, type ProvinceListPayload } from "@/lib/dhis2-shared";
-import { normUnit, type SupervisionPayload } from "@/lib/odk-supervision";
+import { normUnit, type SupervisionCompact, type SupervisionPayload } from "@/lib/odk-supervision";
 import type { Filters } from "@/lib/store";
 import {
   buildReportData,
@@ -24,6 +24,7 @@ import {
   prettyProvince,
   type ActionPCRow,
   type ProblemeRow,
+  type SupervisionProvince,
 } from "@/lib/report-data";
 
 const SLIDES = [
@@ -73,6 +74,10 @@ export default function Dhis2Page() {
   const [sup, setSup] = useState<SupervisionPayload | null>(null);
   const [supState, setSupState] = useState<"idle" | "loading" | "ok" | "error" | "off">("idle");
   const [supError, setSupError] = useState<string | undefined>(undefined);
+  /** Mode national : résumés de supervision par province (agrégés côté serveur). */
+  const [supCompact, setSupCompact] = useState<Record<string, SupervisionCompact>>({});
+  const [supCompactLoading, setSupCompactLoading] = useState<Record<string, boolean>>({});
+  const supSeq = useRef(0);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -182,16 +187,21 @@ export default function Dhis2Page() {
   const drill = useMemo(() => resolveDrillLevel(filters, nbProv > 1), [filters, nbProv]);
   const t = useMemo(() => totals(filtered), [filtered]);
 
-  /* Supervision ODK — chargée pour une seule province à la fois (serveur très lent).
-     Supervisions retenues à partir du 11/08/2026, sauf Kasaï Central et Nord Kivu
+  /* Supervisions retenues à partir du 11/08/2026, sauf Kasaï Central et Nord Kivu
      (lancements décalés) : à partir du 17/08/2026. */
-  const supProvince = selectedBlocks.length === 1 ? selectedBlocks[0].province : null;
-  const supDateMin = useMemo(() => {
-    if (!supProvince) return null;
-    const key = supProvince.normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/[^A-Z]/g, "");
+  const odkDateMinFor = (name: string) => {
+    const key = name.normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/[^A-Z]/g, "");
     return key === "KASAICENTRAL" || key === "NORDKIVU" ? "2026-08-17" : "2026-08-11";
-  }, [supProvince]);
+  };
+  /* Une seule province : payload ODK complet (points scopés au périmètre).
+     Plusieurs provinces : résumés compacts par province (mode national). */
+  const supProvince = selectedBlocks.length === 1 ? selectedBlocks[0].province : null;
+  const supDateMin = supProvince ? odkDateMinFor(supProvince) : null;
   const loadSupervision = useCallback(async (force = false) => {
+    // Jeton anti-course : une réponse arrivée après un changement de sélection
+    // est ignorée (l'ODK d'une province se glissait dans le rapport national).
+    const seq = ++supSeq.current;
+    const fresh = () => seq === supSeq.current;
     if (!supProvince || !supDateMin) {
       setSup(null);
       setSupState("off");
@@ -206,8 +216,9 @@ export default function Dhis2Page() {
     try {
       for (;;) {
         const res = await fetch(`/api/supervision?${qs.toString()}`, { cache: "no-store" });
-        if (!alive.current) return;
+        if (!alive.current || !fresh()) return;
         const json = (await res.json().catch(() => ({}))) as SupervisionPayload & { pending?: boolean };
+        if (!fresh()) return;
         if (res.ok && json.ok) {
           setSup(json);
           setSupState("ok");
@@ -224,13 +235,73 @@ export default function Dhis2Page() {
         return;
       }
     } catch (e) {
-      if (!alive.current) return;
+      if (!alive.current || !fresh()) return;
       setSup(null);
       setSupError(e instanceof Error ? e.message : "réseau");
       setSupState("error");
     }
   }, [supProvince, supDateMin]);
   useEffect(() => { void loadSupervision(false); }, [loadSupervision]);
+
+  /* Mode national : un résumé de supervision compact par province sélectionnée. */
+  const loadSupCompact = useCallback(async (b: ProvinceBlock) => {
+    setSupCompactLoading((l) => ({ ...l, [b.provinceId]: true }));
+    try {
+      const qs = new URLSearchParams({
+        compact: "1",
+        provinceId: b.provinceId,
+        province: b.province,
+        dateMin: odkDateMinFor(b.province),
+      });
+      const deadline = Date.now() + 4 * 60 * 1000;
+      for (;;) {
+        const res = await fetch(`/api/supervision?${qs.toString()}`, { cache: "no-store" });
+        if (!alive.current) return;
+        if (res.status === 202 && Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 8000));
+          continue;
+        }
+        const json = (await res.json().catch(() => ({}))) as SupervisionCompact;
+        if (res.ok && json.ok) setSupCompact((s) => ({ ...s, [b.provinceId]: json }));
+        return;
+      }
+    } finally {
+      if (alive.current) setSupCompactLoading((l) => ({ ...l, [b.provinceId]: false }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (selectedBlocks.length <= 1) return;
+    for (const b of selectedBlocks) {
+      if (!supCompact[b.provinceId] && !supCompactLoading[b.provinceId]) void loadSupCompact(b);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedBlocks, supCompact, loadSupCompact]);
+
+  /** Supervision par province pour le rapport national (cartes ajoutées au téléchargement). */
+  const supervisionParProvince = useMemo<SupervisionProvince[] | undefined>(() => {
+    if (selectedBlocks.length <= 1 || sub.antenne || sub.zs || sub.as) return undefined;
+    const entries: SupervisionProvince[] = [];
+    for (const b of selectedBlocks) {
+      const c = supCompact[b.provinceId];
+      if (!c) continue;
+      entries.push({
+        province: b.province,
+        provinceLabel: prettyProvince(b.province),
+        data: {
+          available: true,
+          fetchedAt: c.fetchedAt,
+          dateMin: c.dateMin,
+          formTitle: c.formTitle,
+          total: c.total,
+          byZS: c.byZS,
+          conformity: c.conformity,
+          points: c.points,
+        },
+      });
+    }
+    return entries.length ? entries : undefined;
+  }, [selectedBlocks, supCompact, sub]);
 
   const dateLancement = useMemo(() => {
     const j1s = selectedBlocks.map((b) => b.j1).filter(Boolean).sort();
@@ -250,13 +321,16 @@ export default function Dhis2Page() {
       supervision: supState === "ok" ? sup : null,
       supervisionReason:
         supState === "off"
-          ? "supervision ODK affichée pour une province à la fois — sélectionnez une seule province"
+          ? (supervisionParProvince
+              ? "supervision détaillée par province (voir diapositives suivantes)"
+              : "résumés de supervision par province en cours de chargement")
           : supError,
+      supervisionParProvince,
       actionsPC: actions,
       dateLancement,
       titre,
     });
-  }, [data, filters, sup, supState, supError, actions, dateLancement, titre]);
+  }, [data, filters, sup, supState, supError, supervisionParProvince, actions, dateLancement, titre]);
 
   useEffect(() => {
     if (!report || problemesTouched) return;
@@ -270,6 +344,25 @@ export default function Dhis2Page() {
     setError(null);
     try {
       const rep = { ...report, problemes };
+      // Mode national : cartes de CHAQUE province (remplissage par ZS + points GPS).
+      if (rep.supervisionParProvince && rep.supervisionParProvince.length > 0) {
+        try {
+          const { renderProvinceMap, colorFor3 } = await import("@/lib/zs-map");
+          const entries = [] as typeof rep.supervisionParProvince;
+          for (const e of rep.supervisionParProvince) {
+            const fill = new Map<string, string>();
+            for (const z of e.data.byZS) fill.set(normUnit(z.zs), colorFor3(z.pctASVisitees));
+            const [mapPng, pointsMapPng] = await Promise.all([
+              renderProvinceMap({ province: e.province, fillByZS: fill, labels: true }),
+              renderProvinceMap({ province: e.province, points: e.data.points, dark: true, labels: true }),
+            ]);
+            entries.push({ ...e, data: { ...e.data, mapPng, pointsMapPng } });
+          }
+          rep.supervisionParProvince = entries;
+        } catch {
+          /* cartes omises */
+        }
+      }
       // Cartes de supervision : rendues seulement quand une seule province est sélectionnée.
       if (selectedBlocks.length === 1) {
         try {
@@ -455,11 +548,34 @@ export default function Dhis2Page() {
                 <button onClick={() => void loadSupervision(true)} className="rounded-lg border border-surface-300 px-3 py-1.5 text-xs font-medium text-navy-700 hover:bg-surface-100">↻ Actualiser</button>
               )}
             </div>
-            {supState === "off" && (
-              <p className="text-xs text-surface-500">
-                La supervision ODK est chargée pour <b>une province à la fois</b> (serveur ODK lent) : sélectionnez une seule
-                province pour l&apos;inclure. Sinon, le rapport contiendra une diapositive « supervision indisponible ».
-              </p>
+            {supState === "off" && selectedBlocks.length > 1 && (
+              <div className="space-y-2">
+                <p className="text-xs text-surface-500">
+                  Mode national : le rapport contiendra une <b>diapositive de supervision par province</b> (cartes, % d&apos;AS
+                  visitées, scores), comme le modèle du 16/08.
+                </p>
+                <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                  {selectedBlocks.map((b) => {
+                    const c = supCompact[b.provinceId];
+                    const busy = Boolean(supCompactLoading[b.provinceId]);
+                    const totalAS = c ? c.byZS.reduce((a, z) => a + z.nbASTotal, 0) : 0;
+                    const vis = c ? c.byZS.reduce((a, z) => a + z.nbASVisitees, 0) : 0;
+                    return (
+                      <div key={b.provinceId} className="rounded-lg border border-surface-200 bg-surface-50 px-2.5 py-1.5 text-[11px] text-navy-700">
+                        <b>{prettyProvince(b.province)}</b> —{" "}
+                        {c
+                          ? `${fmtInt(c.total)} supervisions · ${fmtPct(totalAS ? (100 * vis) / totalAS : null)} d'AS visitées`
+                          : busy
+                            ? "chargement…"
+                            : "en attente"}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            {supState === "off" && selectedBlocks.length <= 1 && (
+              <p className="text-xs text-surface-500">Sélectionnez au moins une province.</p>
             )}
             {supState === "loading" && (
               <p className="flex items-center gap-2 text-xs text-navy-700">

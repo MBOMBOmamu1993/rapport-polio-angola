@@ -2,7 +2,14 @@ import { gunzipSync } from "node:zlib";
 import { NextRequest, NextResponse } from "next/server";
 import { waitUntil } from "@vercel/functions";
 import { lookupSupervision, seedSupervision } from "@/lib/odk-server";
-import type { SupervisionPayload } from "@/lib/odk-supervision";
+import {
+  aggregateSupervisionByZS,
+  indicatorConformity,
+  type SupervisionCompact,
+  type SupervisionPayload,
+  type ZSRef,
+} from "@/lib/odk-supervision";
+import { getProvinceBlockCached } from "@/lib/dhis2-campagne";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,11 +31,46 @@ export async function GET(req: NextRequest) {
   // Province du formulaire ODK (onglet DHIS2 : « Maniema », « Sud Kivu »…) ;
   // sans paramètre, la province par défaut (Kasai_Central) est conservée.
   const province = req.nextUrl.searchParams.get("province")?.slice(0, 40) ?? undefined;
+  // Mode compact (rapport national) : agrégation par ZS côté serveur, jointe aux
+  // Aires de Santé du bloc provincial (masque ou DHIS2) — quelques centaines de Ko
+  // au lieu des dizaines de Mo d'enregistrements bruts.
+  const compact = req.nextUrl.searchParams.get("compact") === "1";
+  const provinceId = req.nextUrl.searchParams.get("provinceId") ?? "";
   try {
     const l = await lookupSupervision({ dateMin, force, province });
     if (l.needsRefresh) {
       const job = l.refresh().catch(() => undefined);
       waitUntil(job);
+    }
+    if (l.payload && compact) {
+      if (!/^[A-Za-z][A-Za-z0-9]{10}$/.test(provinceId)) {
+        return NextResponse.json({ ok: false, reason: "provinceId requis en mode compact" }, { status: 400 });
+      }
+      const block = await getProvinceBlockCached(provinceId);
+      if (!block) {
+        return NextResponse.json({ ok: false, reason: "bloc provincial indisponible" }, { status: 502 });
+      }
+      const zsMap = new Map<string, ZSRef>();
+      for (const r of block.records) {
+        let z = zsMap.get(r.zs);
+        if (!z) { z = { zs: r.zs, antenne: r.antenne, aires: [] }; zsMap.set(r.zs, z); }
+        z.aires.push(r.as);
+      }
+      const recs = l.payload.records;
+      const out: SupervisionCompact = {
+        ok: true,
+        compact: true,
+        provinceId,
+        province: block.province,
+        fetchedAt: l.payload.fetchedAt,
+        dateMin: l.payload.dateMin,
+        formTitle: l.payload.formTitle,
+        total: recs.length,
+        byZS: aggregateSupervisionByZS(recs, Array.from(zsMap.values())),
+        conformity: indicatorConformity(recs),
+        points: recs.filter((r) => r.lat != null && r.lon != null).map((r) => ({ lat: r.lat as number, lon: r.lon as number })),
+      };
+      return NextResponse.json(out, { headers: { "cache-control": "no-store" } });
     }
     if (l.payload) {
       return NextResponse.json(l.payload, { headers: { "cache-control": "no-store" } });

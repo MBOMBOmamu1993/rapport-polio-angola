@@ -20,9 +20,10 @@
  */
 
 import https from "node:https";
-import { ANTIGENES, type ASRecord, type VaccineStats } from "./parse-masque";
-import { antenneForZS } from "./antennes";
+import { ANTIGENES, sanitizeRecords, type ASRecord, type VaccineStats } from "./parse-masque";
+import { antenneForZS, normZS } from "./antennes";
 import { DHIS2_BLOCK_SCHEMA, JOUR_LABELS, NB_JOURS, type ProvinceBlock, type ProvinceInfo } from "./dhis2-shared";
+import { kvGetJSON, kvSetJSON, readNationalBlocks } from "./kv-store";
 
 /* ─── Connexion ────────────────────────────────────────────────────────── */
 
@@ -452,4 +453,82 @@ export async function buildProvinceBlock(provinceId: string): Promise<ProvinceBl
     polio: recs.some((r) => r.ciblePolio > 0),
     records: recs,
   };
+}
+
+/* ─── Accès mutualisé aux blocs provinciaux (routes dhis2 + supervision) ── */
+
+/** Noms propres des provinces DHIS2 (niveau 2) — jointure avec le masque importé. */
+export const PROVINCE_NAMES: Record<string, string> = {
+  rWrCdr321Qu: "Bas Uele", XjeRGfqHMrl: "Equateur", F9w3VW1cQmb: "Haut Katanga",
+  fEKDiQIuqeE: "Haut Lomami", wy1lwIP18SL: "Haut Uele", Q4cbnIAo10f: "Ituri",
+  dKdrd8HqZWz: "Kongo Central", fgHCmGhaP2X: "Kasai Oriental", PvtAI4RUMkr: "Kwango",
+  BmKjwqc6BEw: "Kwilu", TwSa8zUu09Q: "Kinshasa", I8CuQpdBQfP: "Kasai Central",
+  D15NtionqkH: "Kasai", dJ3v8xc6ZIK: "Lualaba", an1cK6GbbVw: "Lomami",
+  u0vP3ZicczY: "Maindombe", krWZMdwGDIf: "Mongala", uyuwe6bqphf: "Maniema",
+  pIAYIpy4hiH: "Nord Kivu", iu4Zj3Zq39m: "Nord Ubangi", GnLX8MNgxZw: "Sud Kivu",
+  ybgmW3kIGuq: "Sankuru", JkIljbLc4Ny: "Sud Ubangi", hyvduSNKvfe: "Tanganyika",
+  mnOXJ2Oa5U7: "Tshopo", ym2K6YcSNl9: "Tshuapa",
+};
+
+function mostCommon(arr: string[]): string {
+  const c = new Map<string, number>();
+  for (const v of arr) c.set(v, (c.get(v) ?? 0) + 1);
+  let best = "";
+  let max = -1;
+  for (const [k, n] of c) if (n > max) { max = n; best = k; }
+  return best;
+}
+
+/**
+ * Résultats du dernier masque de saisie importé pour cette province (compilation
+ * partagée) — TOUJOURS prioritaires sur DHIS2 : certaines provinces (Kasaï
+ * Central : Kananga, Luiza) saisissent leurs résultats dans le masque et
+ * n'alimentent pas DHIS2. Null si aucun masque n'est importé pour la province.
+ */
+export async function masqueBlockFor(provinceId: string): Promise<ProvinceBlock | null> {
+  const name = PROVINCE_NAMES[provinceId];
+  if (!name) return null;
+  try {
+    const blocks = await readNationalBlocks();
+    const match = blocks.filter((b) => normZS(b.province) === normZS(name));
+    if (match.length === 0) return null;
+    const records = sanitizeRecords(match.flatMap((b) => b.records));
+    if (records.length === 0) return null;
+    // J1 : le Kasaï Central a lancé sa campagne le 17/08/2026 (confirmé) — les
+    // dates du masque ne sont pas fiables (05/08 = valeur par défaut du modèle).
+    const dates = match
+      .map((b) => b.dateDebut ?? "")
+      .filter((d) => d >= "2026-08-10" && d <= "2026-09-30");
+    const j1 = normZS(name) === "KASAICENTRAL" ? "2026-08-17" : mostCommon(dates) || "2026-08-17";
+    const latest = match.reduce((m, b) => (b.importedAt > m ? b.importedAt : m), "");
+    return {
+      ok: true,
+      schema: DHIS2_BLOCK_SCHEMA,
+      fetchedAt: latest || new Date().toISOString(),
+      provinceId,
+      province: mostCommon(records.map((r) => r.province)) || name,
+      j1,
+      polio: records.some((r) => r.ciblePolio > 0),
+      source: "masque",
+      records,
+    };
+  } catch {
+    return null; // KV indisponible → repli DHIS2
+  }
+}
+
+/** Bloc provincial : masque prioritaire, puis cache KV, puis extraction DHIS2 live. */
+export async function getProvinceBlockCached(provinceId: string): Promise<ProvinceBlock | null> {
+  const masque = await masqueBlockFor(provinceId);
+  if (masque) return masque;
+  const key = `rrpolio:dhis2:v${DHIS2_BLOCK_SCHEMA}:prov:${provinceId}`;
+  const saved = await kvGetJSON<ProvinceBlock>(key);
+  if (saved?.ok && saved.schema === DHIS2_BLOCK_SCHEMA) return saved;
+  try {
+    const built = await buildProvinceBlock(provinceId);
+    await kvSetJSON(key, built);
+    return built;
+  } catch {
+    return null;
+  }
 }

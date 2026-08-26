@@ -51,6 +51,13 @@ export interface SupervisionData {
   pointsMapPng?: string | null;
 }
 
+/** Supervision d'une province (rapport national : une section par province, modèle 16/08). */
+export interface SupervisionProvince {
+  province: string;
+  provinceLabel: string;
+  data: SupervisionData;
+}
+
 export interface ReportData {
   titre: string;
   province: string;
@@ -73,6 +80,8 @@ export interface ReportData {
   aires: UnitAgg[];
   total: UnitAgg;
   supervision: SupervisionData;
+  /** Mode national (plusieurs provinces) : supervision détaillée par province. */
+  supervisionParProvince?: SupervisionProvince[];
   actionsPC: ActionPCRow[];
   problemes: ProblemeRow[];
 }
@@ -240,6 +249,8 @@ export interface BuildReportInput {
   filters: Filters;
   supervision: SupervisionPayload | null;
   supervisionReason?: string;
+  /** Mode national : supervision par province (déjà agrégée côté serveur). */
+  supervisionParProvince?: SupervisionProvince[];
   actionsPC: ActionPCRow[];
   problemes?: ProblemeRow[];
   dateLancement?: string;
@@ -320,6 +331,7 @@ export function buildReportData(inp: BuildReportInput): ReportData {
     aires,
     total,
     supervision,
+    supervisionParProvince: inp.supervisionParProvince,
     actionsPC: inp.actionsPC,
     problemes: inp.problemes ?? computeProblemes(units, total, drill.label, supervision),
   };

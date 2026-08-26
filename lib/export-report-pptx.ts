@@ -1324,8 +1324,15 @@ function supColorHex(v: number | null): string {
 
 function buildSupervision(ctx: Ctx): void {
   const { pptx, d } = ctx;
+  // Rapport national : supervision détaillée PAR PROVINCE (modèle du 16/08).
+  if (d.supervisionParProvince && d.supervisionParProvince.length > 0) {
+    buildSupervisionNational(ctx);
+    return;
+  }
   const sup = d.supervision;
-  const label = d.byUnitLabel === "Aire de Santé" ? "Zone de Santé" : d.byUnitLabel;
+  // Les tableaux de supervision sont TOUJOURS agrégés par Zone de Santé,
+  // quel que soit le niveau de désagrégation du reste du rapport.
+  const label = "Zone de Santé";
   const jour = d.jourLabels.length ? d.jourLabels[d.jourLabels.length - 1] : "J1";
   const jourTxt = jour === "Ratissage" ? "au ratissage" : `au ${jour}`;
   const source = `Source : Questionnaire de supervision des équipes intégrées (ODK/OMS, formulaire ${sup.formTitle || "Bloc 3"}) — supervisions à partir du ${sup.dateMin ? sup.dateMin.split("-").reverse().join("/") : "17/08/2026"}`;
@@ -1452,6 +1459,173 @@ function buildSupervision(ctx: Ctx): void {
       const weak = sorted.filter((c) => (c.pct ?? 100) < 70).slice(0, 5);
       const strong = [...sorted].reverse().filter((c) => (c.pct ?? 0) >= 90).slice(0, 3);
       const cmt = `${sup.total} équipes supervisées. ${weak.length ? `Points faibles (< 70 % de conformité) : ${joinAnd(weak.map((c) => `${c.label} (${fmtPct(c.pct, 0)})`))}. ` : "Aucun indicateur sous 70 % de conformité. "}${strong.length ? `Points forts : ${joinAnd(strong.map((c) => c.label))}.` : ""}`;
+      commentBox(ctx, s, cmt, { x: 0.3, y: 6.55, w: W - 0.6, h: 0.6 });
+    }
+    s.addText(source, { x: 0.13, y: 7.18, w: 12.5, h: 0.28, fontSize: 10, color: TITLE_BLUE, fontFace: FONT_TITLE, fit: "shrink" });
+  }
+}
+
+/* ─── 15 bis. Supervision — mode national (une section par province) ────── */
+
+function normProvKey(s: string): string {
+  return (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+/**
+ * Supervision du rapport national, calquée sur le modèle du 16/08 :
+ *  A. accroche nationale (% d'AS visitées par province) ;
+ *  B. une diapositive d'analyse par province (barres ZS, cartes, taux) ;
+ *  C. détail par Zone de Santé (toutes provinces, paginé) ;
+ *  D. conformité par indicateur (fusion nationale pondérée).
+ */
+function buildSupervisionNational(ctx: Ctx): void {
+  const { pptx, d } = ctx;
+  const entries = [...(d.supervisionParProvince ?? [])].sort((a, b) => a.provinceLabel.localeCompare(b.provinceLabel, "fr"));
+  if (entries.length === 0) return;
+  const jour = d.jourLabels.length ? d.jourLabels[d.jourLabels.length - 1] : "J1";
+  const jourTxt = jour === "Ratissage" ? "au ratissage" : `au ${jour}`;
+  const formTitle = entries[0].data.formTitle || "Bloc 3";
+  const source = `Source : Questionnaire de supervision des équipes intégrées (ODK/OMS, formulaire ${formTitle})`;
+
+  const parProv = entries.map((e) => {
+    const totalAS = e.data.byZS.reduce((a, z) => a + z.nbASTotal, 0);
+    const visited = e.data.byZS.reduce((a, z) => a + z.nbASVisitees, 0);
+    return { e, label: e.provinceLabel, total: e.data.total, totalAS, visited, pct: totalAS ? (visited / totalAS) * 100 : null };
+  });
+  const byPct = [...parProv].sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1));
+  const under80Prov = parProv.filter((p) => (p.pct ?? 0) < 80);
+  const allAS = parProv.reduce((a, p) => a + p.totalAS, 0);
+  const allVis = parProv.reduce((a, p) => a + p.visited, 0);
+  const allSup = parProv.reduce((a, p) => a + p.total, 0);
+  const pctGlobal = allAS ? (allVis / allAS) * 100 : 0;
+
+  // A. Accroche nationale (modèle diapo 20).
+  {
+    const s = pptx.addSlide();
+    headerAccroche(
+      ctx, s,
+      `${under80Prov.length} province${under80Prov.length > 1 ? "s" : ""} sur ${parProv.length} ${under80Prov.length > 1 ? "restent" : "reste"} en dessous de 80 % d'aires de santé visitées ${jourTxt} de la campagne (${fmtPct(pctGlobal, 1)} d'AS visitées, ${fmtInt(allSup)} supervisions)`
+    );
+    colChart(ctx, s, { x: 0.3, y: 1.3, w: 6.0, h: 5.2 }, byPct.map((p) => p.label), byPct.map((p) => r2(p.pct)), byPct.map((p) => supColorHex(p.pct)), { barDir: "bar", fmt: '0.0"%"', min: 0, max: 100, fontSize: 10, labelFont: 10, showAxis: false, gap: 55 });
+    const head: PptxGenJS.TableRow = ["Province", "Supervisions", "AS totales", "AS visitées", "% AS visitées"].map((h, i) => ({ text: h, options: th(TITLE_BLUE, { fontSize: 10, align: i === 0 ? "left" : "center" }) }));
+    const body: PptxGenJS.TableRow[] = byPct.map((p, i) => {
+      const pc = supColorHex(p.pct);
+      return [
+        { text: p.label, options: td({ bold: true, fontSize: 10, ...zebra(i) }) },
+        { text: fmtInt(p.total), options: tdNum({ fontSize: 10, align: "center", ...zebra(i) }) },
+        { text: fmtInt(p.totalAS), options: tdNum({ fontSize: 10, align: "center", ...zebra(i) }) },
+        { text: fmtInt(p.visited), options: tdNum({ fontSize: 10, align: "center", ...zebra(i) }) },
+        { text: fmtPct(p.pct, 1), options: td({ fontSize: 10, bold: true, align: "center", fill: { color: pc }, color: onColor(pc) }) },
+      ];
+    });
+    body.push([
+      { text: "Total", options: ttotal(TITLE_BLUE, { align: "left", fontSize: 10 }) },
+      { text: fmtInt(allSup), options: ttotal(TITLE_BLUE, { fontSize: 10, align: "center" }) },
+      { text: fmtInt(allAS), options: ttotal(TITLE_BLUE, { fontSize: 10, align: "center" }) },
+      { text: fmtInt(allVis), options: ttotal(TITLE_BLUE, { fontSize: 10, align: "center" }) },
+      { text: fmtPct(pctGlobal, 1), options: ttotal(TITLE_BLUE, { fontSize: 10, align: "center" }) },
+    ]);
+    s.addTable([head, ...body], { x: 6.7, y: 1.4, w: 6.3, colW: colW(6.3, [1.7, 1.1, 1.05, 1.05, 1.4]), border: TABLE_BORDER, rowH: 0.32, valign: "middle", autoPage: false });
+    const leg = [{ c: SUP_RED, t: "< 50%" }, { c: SUP_ORANGE, t: "50-80%" }, { c: SUP_GREEN, t: ">=80%" }];
+    leg.forEach((l, i) => {
+      s.addShape(pptx.ShapeType.ellipse, { x: 6.9 + i * 1.3, y: 6.78, w: 0.16, h: 0.16, fill: { color: l.c }, line: { color: l.c, width: 0 } });
+      s.addText(l.t, { x: 7.1 + i * 1.3, y: 6.72, w: 1.1, h: 0.28, fontSize: 9, color: GREY, fontFace: FONT, valign: "middle" });
+    });
+    s.addText(`${source}. Le questionnaire de supervision est le questionnaire des sites.`, { x: 0.2, y: 7.02, w: W - 0.4, h: 0.4, fontSize: 10, color: BLACK, fontFace: FONT_TITLE, fit: "shrink" });
+  }
+
+  // B. Une diapositive d'analyse par province (modèle diapos 21-26).
+  for (const e of entries) {
+    const sup = e.data;
+    const zsRows = [...sup.byZS].sort((a, b) => (b.pctASVisitees ?? -1) - (a.pctASVisitees ?? -1) || a.zs.localeCompare(b.zs));
+    const under50 = zsRows.filter((z) => (z.pctASVisitees ?? 0) < 50);
+    const zsUnder80 = zsRows.filter((z) => (z.pctASVisitees ?? 0) < 80);
+    const s = pptx.addSlide();
+    const accroche = sup.total === 0
+      ? `${e.provinceLabel} | Aucune donnée de supervision ODK — les superviseurs doivent saisir chaque supervision d'équipe le jour même`
+      : under50.length > 0
+        ? `${e.provinceLabel} | L'analyse des données de supervision montre que ${under50.length} ZS (${joinAnd(under50.slice(0, 4).map((z) => z.zs))}${under50.length > 4 ? "…" : ""}) ${under50.length > 1 ? "ont" : "a"} moins de 50 % des aires de santé visitées ${jourTxt} de la campagne`
+        : zsUnder80.length > 0
+          ? `${e.provinceLabel} | La plupart des aires de santé ont été visitées ${jourTxt} ; ${zsUnder80.length} ZS (${joinAnd(zsUnder80.slice(0, 4).map((z) => z.zs))}${zsUnder80.length > 4 ? "…" : ""}) ${zsUnder80.length > 1 ? "restent" : "reste"} en dessous de 80 % d'AS visitées`
+          : `${e.provinceLabel} | Toutes les ZS ont au moins 80 % de leurs aires de santé visitées ${jourTxt} de la campagne`;
+    headerAccroche(ctx, s, accroche);
+    const shown = zsRows.slice(0, 30);
+    colChart(ctx, s, { x: 0.15, y: 1.1, w: 4.6, h: 4.3 }, shown.map((z) => `${z.antenne} | ${z.zs}`), shown.map((z) => r2(z.pctASVisitees)), shown.map((z) => supColorHex(z.pctASVisitees)), { barDir: "bar", fmt: '0.0"%"', min: 0, max: 100, fontSize: 7, labelFont: 7, showAxis: false, gap: 50 });
+    if (sup.mapPng) s.addImage({ data: sup.mapPng, x: 4.85, y: 1.05, w: 4.1, h: 4.1 });
+    if (sup.pointsMapPng) {
+      s.addImage({ data: sup.pointsMapPng, x: 9.05, y: 1.05, w: 4.1, h: 4.1 });
+      s.addText(`Points = ${fmtInt(sup.points.length)} soumissions ODK de supervision des équipes (GPS)`, { x: 9.05, y: 5.15, w: 4.1, h: 0.25, fontSize: 8, italic: true, color: GREY, fontFace: FONT, align: "center" });
+    } else if (!sup.mapPng) s.addText("Cartes indisponibles", { x: 4.85, y: 2.5, w: 8, h: 0.6, align: "center", fontSize: 12, italic: true, color: GREY });
+    const nonVis = zsRows.filter((z) => z.asNonVisitees.length > 0).sort((a, b) => b.asNonVisitees.length - a.asNonVisitees.length).slice(0, 3);
+    const nonVisTxt = nonVis.length
+      ? `Parties non supervisées : ${nonVis.map((z) => `${z.zs} (${z.asNonVisitees.length} AS)`).join(", ")}${zsRows.filter((z) => z.asNonVisitees.length > 0).length > 3 ? "…" : ""}`
+      : "Toutes les aires de santé de la province ont été visitées.";
+    s.addText(nonVisTxt, { x: 4.85, y: 5.4, w: 8.3, h: 0.4, fontSize: 12, color: BLACK, fontFace: FONT_TITLE, align: "center" });
+    // Taux de la province — « — » sur le volet polio des provinces RR seule (N/A du modèle).
+    const u = d.units.find((x) => normProvKey(x.unit) === normProvKey(e.province) || normProvKey(x.unit) === normProvKey(e.provinceLabel));
+    const head: PptxGenJS.TableRow = ["Taux de couverture RR", "Taux de couverture nVPO2", "Taux de couverture VPOb", "Taux de complétude"].map((h) => ({ text: h, options: th(TITLE_BLUE, { fontSize: 12, fontFace: FONT_TITLE }) }));
+    const val = (v: number | null | undefined): PptxGenJS.TableCell => ({ text: fmtPct(v ?? null, 0, "%"), options: td({ fontSize: 16, bold: true, align: "center", fontFace: FONT_TITLE, fill: { color: v == null ? GREY_LT : v < 80 ? "F4CCCC" : "D9EAD3" } }) });
+    s.addTable([head, [val(u?.rr.cv), val(u?.nvpo2.cv), val(u?.vpob.cv), val(u?.completude)]], { x: 0.45, y: 5.84, w: W - 0.9, colW: colW(W - 0.9, [1, 1, 1, 1]), border: { type: "solid", color: BLACK, pt: 0.75 }, rowH: 0.5, valign: "middle", autoPage: false });
+    s.addText(`Source : 1. ODK, 2. ${dataSource}`, { x: 0.13, y: 7.05, w: 12, h: 0.3, fontSize: 11, color: TITLE_BLUE, fontFace: FONT_TITLE });
+  }
+
+  // C. Détail par Zone de Santé (toutes provinces, paginé).
+  {
+    const rows = entries
+      .flatMap((e) => e.data.byZS.map((z) => ({ ...z, prov: e.provinceLabel })))
+      .sort((a, b) => (b.pctASVisitees ?? -1) - (a.pctASVisitees ?? -1) || a.zs.localeCompare(b.zs));
+    const pages = chunk(rows, 20);
+    pages.forEach((page, idx) => {
+      const s = pptx.addSlide();
+      header(ctx, s, `Supervision des équipes de vaccination (ODK) : couverture et score par Zone de Santé${suite(idx, pages.length)}`, { h: 0.62 });
+      const head: PptxGenJS.TableRow = ["Province", "Antenne", "Zone de Santé", "Supervisions", "AS totales", "AS visitées", "% AS visitées", "Score conformité", "AS non encore visitées"].map((h, i) => ({ text: h, options: th(TITLE_BLUE, { fontSize: 9, align: i < 3 || i === 8 ? "left" : "center" }) }));
+      const body: PptxGenJS.TableRow[] = page.map((z, i) => {
+        const pc = supColorHex(z.pctASVisitees);
+        const sc = supColorHex(z.score);
+        return [
+          { text: z.prov, options: td({ fontSize: 9, ...zebra(i) }) },
+          { text: z.antenne, options: td({ fontSize: 9, ...zebra(i) }) },
+          { text: z.zs, options: td({ bold: true, fontSize: 9, ...zebra(i) }) },
+          { text: fmtInt(z.nbSupervisions), options: tdNum({ fontSize: 9, align: "center", ...zebra(i) }) },
+          { text: fmtInt(z.nbASTotal), options: tdNum({ fontSize: 9, align: "center", ...zebra(i) }) },
+          { text: fmtInt(z.nbASVisitees), options: tdNum({ fontSize: 9, align: "center", ...zebra(i) }) },
+          { text: fmtPct(z.pctASVisitees, 1), options: td({ fontSize: 9, bold: true, align: "center", fill: { color: pc }, color: onColor(pc) }) },
+          { text: fmtPct(z.score, 1), options: td({ fontSize: 9, bold: true, align: "center", fill: { color: sc }, color: onColor(sc) }) },
+          { text: z.asNonVisitees.length ? (z.asNonVisitees.length > 5 ? `${z.asNonVisitees.slice(0, 5).join(", ")} … (+${z.asNonVisitees.length - 5})` : z.asNonVisitees.join(", ")) : "—", options: td({ fontSize: 8, ...zebra(i) }) },
+        ];
+      });
+      s.addTable([head, ...body], { x: 0.3, y: 0.85, w: W - 0.6, colW: colW(W - 0.6, [1.0, 1.0, 1.3, 0.85, 0.75, 0.8, 0.9, 1.0, 5.1]), border: TABLE_BORDER, rowH: 0.27, valign: "middle", autoPage: false });
+      s.addText(`${source} — supervisions à partir du 11/08/2026 (17/08 pour Kasaï Central et Nord Kivu)`, { x: 0.13, y: 7.18, w: 12.5, h: 0.28, fontSize: 10, color: TITLE_BLUE, fontFace: FONT_TITLE, fit: "shrink" });
+    });
+  }
+
+  // D. Conformité par indicateur — fusion nationale pondérée par le nombre de supervisions.
+  {
+    const merged = new Map<string, { key: string; label: string; group: string; n: number; ok: number }>();
+    for (const e of entries) {
+      for (const c of e.data.conformity) {
+        let m = merged.get(c.key);
+        if (!m) { m = { key: c.key, label: c.label, group: c.group, n: 0, ok: 0 }; merged.set(c.key, m); }
+        m.n += c.n;
+        m.ok += c.ok;
+      }
+    }
+    const conf = Array.from(merged.values()).filter((c) => c.n > 0).map((c) => ({ ...c, pct: c.n ? (100 * c.ok) / c.n : null }));
+    const s = pptx.addSlide();
+    header(ctx, s, "Supervision des équipes (ODK) : conformité par indicateur — ensemble des provinces", { h: 0.62 });
+    if (conf.length === 0) {
+      s.addText("Aucune supervision saisie : conformité non calculable.", { x: 1, y: 3, w: W - 2, h: 1, align: "center", fontSize: 14, italic: true, color: GREY });
+    } else {
+      const sorted = [...conf].sort((a, b) => (a.pct ?? 0) - (b.pct ?? 0));
+      const half = Math.ceil(sorted.length / 2);
+      const draw = (items: typeof sorted, x: number) => {
+        colChart(ctx, s, { x, y: 0.85, w: (W - 0.7) / 2, h: 5.6 }, items.map((c) => (c.n < allSup ? `${c.label} (n=${fmtInt(c.n)})` : c.label)), items.map((c) => r2(c.pct)), items.map((c) => supColorHex(c.pct)), { barDir: "bar", fmt: '0"%"', min: 0, max: 100, fontSize: 7, labelFont: 7, showAxis: false, gap: 45 });
+      };
+      draw(sorted.slice(0, half), 0.2);
+      draw(sorted.slice(half), 0.35 + (W - 0.7) / 2);
+      const weak = sorted.filter((c) => (c.pct ?? 100) < 70).slice(0, 5);
+      const strong = [...sorted].reverse().filter((c) => (c.pct ?? 0) >= 90).slice(0, 3);
+      const cmt = `${fmtInt(allSup)} équipes supervisées (${entries.length} provinces). ${weak.length ? `Points faibles (< 70 % de conformité) : ${joinAnd(weak.map((c) => `${c.label} (${fmtPct(c.pct, 0)})`))}. ` : "Aucun indicateur sous 70 % de conformité. "}${strong.length ? `Points forts : ${joinAnd(strong.map((c) => c.label))}.` : ""}`;
       commentBox(ctx, s, cmt, { x: 0.3, y: 6.55, w: W - 0.6, h: 0.6 });
     }
     s.addText(source, { x: 0.13, y: 7.18, w: 12.5, h: 0.28, fontSize: 10, color: TITLE_BLUE, fontFace: FONT_TITLE, fit: "shrink" });

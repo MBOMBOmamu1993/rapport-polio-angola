@@ -206,3 +206,23 @@ export function supervisionColor(v: number | null): "red" | "orange" | "green" |
   if (v >= 50) return "orange";
   return "red";
 }
+
+/**
+ * Résumé de supervision d'une province, agrégé côté serveur (mode national de
+ * l'onglet DHIS2) : évite de télécharger les dizaines de Mo d'enregistrements
+ * bruts — seuls les agrégats par ZS, la conformité et les points GPS transitent.
+ */
+export interface SupervisionCompact {
+  ok: boolean;
+  compact: true;
+  provinceId: string;
+  province: string;
+  fetchedAt: string;
+  dateMin: string;
+  formTitle: string;
+  total: number;
+  byZS: ZSSupervision[];
+  conformity: ReturnType<typeof indicatorConformity>;
+  points: { lat: number; lon: number }[];
+  reason?: string;
+}
