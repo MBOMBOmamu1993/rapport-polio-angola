@@ -97,13 +97,13 @@ async function masqueBlockFor(provinceId: string): Promise<ProvinceBlock | null>
     if (match.length === 0) return null;
     const records = sanitizeRecords(match.flatMap((b) => b.records));
     if (records.length === 0) return null;
-    // J1 : date de début des masques si plausible — la campagne Bloc 3 démarre
-    // au plus tôt le 10/08/2026 (certains masques portent des dates parasites,
-    // ex. 05/08) ; à défaut, lancement Kasaï Central du 17/08/2026.
+    // J1 : le Kasaï Central a lancé sa campagne le 17/08/2026 (confirmé) — les
+    // dates du masque ne sont pas fiables (05/08 = valeur par défaut du modèle).
+    // Autres provinces sur masque : date de début plausible (10/08–30/09), sinon 17/08.
     const dates = match
       .map((b) => b.dateDebut ?? "")
       .filter((d) => d >= "2026-08-10" && d <= "2026-09-30");
-    const j1 = mostCommon(dates) || "2026-08-17";
+    const j1 = normZS(name) === "KASAICENTRAL" ? "2026-08-17" : mostCommon(dates) || "2026-08-17";
     const latest = match.reduce((m, b) => (b.importedAt > m ? b.importedAt : m), "");
     return {
       ok: true,
