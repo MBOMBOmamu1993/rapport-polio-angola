@@ -117,6 +117,30 @@ export function kvAvailable(): boolean {
   return Boolean(url && token);
 }
 
+/**
+ * Verrou best-effort inter-instances (SET NX + expiration) : évite que
+ * plusieurs lambdas lancent en parallèle la même extraction lourde (ODK).
+ * Sans KV, le verrou est réputé acquis (une seule instance en dev local).
+ */
+export async function kvTryLock(name: string, ttlSeconds: number): Promise<boolean> {
+  if (!kvAvailable()) return true;
+  try {
+    const res = await kvClient().set(`lock:${name}`, "1", { nx: true, ex: ttlSeconds });
+    return res === "OK";
+  } catch {
+    return true; // KV en panne → ne pas bloquer l'extraction
+  }
+}
+
+export async function kvUnlock(name: string): Promise<void> {
+  if (!kvAvailable()) return;
+  try {
+    await kvClient().del(`lock:${name}`);
+  } catch {
+    /* le TTL fera le ménage */
+  }
+}
+
 function slug(s: string): string {
   return (s || "—").trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_|_$/g, "") || "NA";
 }

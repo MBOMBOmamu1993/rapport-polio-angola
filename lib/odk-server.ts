@@ -12,7 +12,7 @@
  */
 
 import { SUPERVISION_INDICATORS, type SupervisionPayload, type SupervisionRecord } from "./odk-supervision";
-import { kvGetJSON, kvSetJSON } from "./kv-store";
+import { kvGetJSON, kvSetJSON, kvTryLock, kvUnlock } from "./kv-store";
 
 const DEFAULTS = {
   baseUrl: "https://api.whonghub.org",
@@ -124,25 +124,6 @@ function cacheKey(cfg: ReturnType<typeof odkConfig>, dateMin: string, province: 
   return `${cfg.formId}|${canonicalProvince(province)}|${dateMin}`;
 }
 
-/**
- * Variantes d'orthographe du champ « Province » du formulaire (les saisies ODK
- * mélangent « Kasai_Central », « Maniema », parfois espaces, tirets ou
- * majuscules) : la requête utilise un `$in` pour les absorber toutes.
- */
-function provinceCandidates(p: string): string[] {
-  const canon = canonicalProvince(p);
-  const spaced = canon.replace(/_/g, " ");
-  const forms = new Set<string>([
-    (p || "").trim(),
-    canon,
-    spaced,
-    canon.replace(/_/g, "-"),
-    canon.toUpperCase(),
-    spaced.toUpperCase(),
-    spaced.toLowerCase(),
-  ]);
-  return Array.from(forms).filter(Boolean);
-}
 function resolveDateMin(cfg: ReturnType<typeof odkConfig>, dateMin?: string): string {
   return /^\d{4}-\d{2}-\d{2}$/.test(dateMin ?? "") ? (dateMin as string) : cfg.dateMin;
 }
@@ -175,6 +156,14 @@ async function refreshFromOdk(dateMin: string, province?: string): Promise<Super
   if (running) return running;
   const job = (async () => {
     const prev = cache && cache.key === key ? cache.payload : await kvGetJSON<SupervisionPayload>(`rrpolio:odk:${key}`);
+    // Une seule extraction ODK à la fois pour cette clé, toutes instances
+    // confondues : les sondages 202 répétés relançaient des extractions
+    // parallèles qui saturaient le serveur ODK sans jamais aboutir.
+    if (!(await kvTryLock(`rrpolio:odk:${key}`, 280))) {
+      if (prev?.ok) return prev;
+      throw new Error("extraction ODK déjà en cours (autre instance)");
+    }
+    try {
     const hasPrev = Boolean(prev?.ok && prev.records.length);
     const prevAt = hasPrev ? Date.parse(prev!.fetchedAt) : NaN;
     const since = hasPrev
@@ -182,7 +171,7 @@ async function refreshFromOdk(dateMin: string, province?: string): Promise<Super
         (Number.isFinite(prevAt) ? new Date(prevAt - INCREMENTAL_MARGIN_MS).toISOString().slice(0, 19) : null)
       : null;
     const query = JSON.stringify({
-      "group_identification/Province": { $in: provinceCandidates(prov) },
+      "group_identification/Province": canonicalProvince(prov),
       "group_identification/date_supervision": { $gte: dateMin },
       ...(since ? { _submission_time: { $gte: since } } : {}),
     });
@@ -243,6 +232,9 @@ async function refreshFromOdk(dateMin: string, province?: string): Promise<Super
       `${pages} page(s), ${received} reçues, ${records.length} au total, ${Math.round((Date.now() - started) / 1000)} s.`
     );
     return payload;
+    } finally {
+      await kvUnlock(`rrpolio:odk:${key}`);
+    }
   })();
   inflight.set(key, job);
   job.finally(() => inflight.delete(key)).catch(() => undefined);
