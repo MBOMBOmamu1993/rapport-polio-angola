@@ -281,7 +281,14 @@ export default function Dhis2Page() {
         rep.supervision = { ...rep.supervision, mapPng: null, pointsMapPng: null };
       }
       const { exportReportPPT } = await import("@/lib/export-report-pptx");
+      // Sélection large (≥ 4 provinces) : nom de fichier calqué sur le rapport
+      // national Bloc 3 (« Résultats_Partiels_Campagne intégrée_Bloc3_Aout 2026_J1-J5 »).
+      const fileName =
+        selectedBlocks.length >= 4 && !sub.antenne && !sub.zs && !sub.as
+          ? `Resultats_Partiels_Campagne_integree_Bloc3_Aout_2026_J1-J5_${rep.dateMaj.replace(/\//g, "-")}.pptx`
+          : undefined;
       await exportReportPPT(rep, {
+        fileName,
         sourceText: "DHIS2 de campagne (rdccampagne.hispwca.org) — dataset PEV_Campagne RR et Polio",
       });
       setDone(`Rapport généré (${new Date().toLocaleTimeString("fr-FR")}).`);

@@ -294,9 +294,9 @@ export function buildReportData(inp: BuildReportInput): ReportData {
     filters.zs ? `Zone de Santé : ${filters.zs}` :
     filters.antenne ? `Antenne : ${filters.antenne}` :
     multiProvince
-      ? (provincesList.length <= 5
+      ? (provincesList.length <= 3
           ? `Provinces : ${provincesList.join(", ")}`
-          : `RD Congo — ${provincesList.length} provinces`)
+          : `Bloc 3 — Août 2026 (${provincesList.length} provinces)`)
       : `Province du ${provinceLabel}`;
   const dateLancement = inp.dateLancement || data.meta.dateDebut || "";
   const jl = data.meta.jourLabels;

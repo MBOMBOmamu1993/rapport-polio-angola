@@ -348,7 +348,9 @@ function colChart(
   colors: string[],
   o: { valAxisTitle?: string; catAxisTitle?: string; fmt?: string; max?: number; min?: number; fontSize?: number; labelFont?: number; barDir?: "col" | "bar"; showAxis?: boolean; gap?: number } = {}
 ): void {
-  if (labels.length === 0) return;
+  // Une zone dégénérée (hauteur/largeur quasi nulle ou négative) produit un
+  // XML invalide (<a:ext cy="-…">) que PowerPoint refuse d'ouvrir.
+  if (labels.length === 0 || pos.h < 0.35 || pos.w < 0.5) return;
   // PowerPoint trace la première catégorie en bas des barres horizontales : on
   // inverse pour lire du haut vers le bas dans l'ordre fourni.
   if ((o.barDir ?? "col") === "bar") {
@@ -620,7 +622,7 @@ function buildSynthese(ctx: Ctx): void {
       legendsBottom(ctx, s, 6.78, 3.75, W - 3.9, true, true, true);
     });
   };
-  if (d.antennes.length > 1) draw(syntheseRows(d.antennes, "Antenne", d.dateLancement, d.total), "Antenne", 20);
+  if (d.antennes.length > 1) draw(syntheseRows(d.antennes, "Antenne", d.dateLancement, d.total), "Antenne", 15);
   draw(syntheseRows(d.units, d.byUnitLabel, d.dateLancement, d.total), d.byUnitLabel, 15);
 }
 
@@ -705,20 +707,47 @@ function buildCompletude(ctx: Ctx): void {
   const nCols = 4 + jours.length * 2;
   const weights = [1.5, 0.8, ...jours.flatMap(() => [0.7, 0.75]), 0.75, 0.8];
 
-  // A. Par antenne : tableau + graphique sur la même diapo (modèle « par province »).
+  // A. Par antenne : tableau (paginé si beaucoup d'antennes) + graphique sur la
+  //    même diapo quand il reste de la place, sinon sur sa propre diapo — un
+  //    graphique de hauteur négative corrompait le fichier à partir de ~15 antennes.
   if (d.antennes.length > 1) {
-    const s = pptx.addSlide();
-    header(ctx, s, "Résultats Partiels : Complétude de saisie des rapports journalières et globale par Antenne", { h: 0.49 });
-    frame(ctx, s, 0.05, 0.62, 9.75, 6.75);
-    blockTitle(ctx, s, "Complétudes journalières de saisie des rapports des AS par Antenne", 0.05, 0.62, 9.75, NAVY_TABLE, 0.38, 13);
-    const rows = completudeTable(d.antennes, "Antenne", jours, d.total);
-    s.addTable(rows, { x: 0.1, y: 1.05, w: 9.65, colW: colW(9.65, weights.slice(0, nCols)), border: TABLE_BORDER, rowH: 0.28, valign: "middle", autoPage: false });
-    const chartY = 1.05 + 0.3 * (rows.length + 1) + 0.15;
-    blockTitle(ctx, s, "Complétudes globales de saisie des rapports journaliers des Aires de Santé par Antenne", 0.05, chartY, 9.75, NAVY_TABLE, 0.36, 13);
-    const sorted = [...d.antennes].sort((a, b) => (b.completude ?? -1) - (a.completude ?? -1));
-    colChart(ctx, s, { x: 0.1, y: chartY + 0.4, w: 9.65, h: 6.75 - (chartY - 0.62) - 0.95 }, sorted.map((u) => u.unit), sorted.map((u) => r2(u.completude)), sorted.map((u) => covColor(u.completude)), { valAxisTitle: "Complétude données", catAxisTitle: "Antenne", fmt: '0.00" %"', max: 100, min: 0 });
-    legendBar(ctx, s, 0.05, 6.82, 9.75, "CRITERES DE GRADUATION DES COMPLETUDES", LEG_COV, NAVY_TABLE, 0.26);
-    commentBox(ctx, s, completudeComment(d, d.antennes, "Antenne"), { x: 9.87, y: 0.62, w: 3.37, h: 6.75 });
+    const rowsAll = completudeTable(d.antennes, "Antenne", jours, d.total);
+    const headA = rowsAll[0];
+    const bodyA = rowsAll.slice(1, -1);
+    const totalA = rowsAll[rowsAll.length - 1];
+    const pagesA = chunk(bodyA, 16);
+    let chartDrawn = false;
+    pagesA.forEach((page, idx) => {
+      const s = pptx.addSlide();
+      header(ctx, s, `Résultats Partiels : Complétude de saisie des rapports journalières et globale par Antenne${suite(idx, pagesA.length)}`, { h: 0.49 });
+      frame(ctx, s, 0.05, 0.62, 9.75, 6.75);
+      blockTitle(ctx, s, "Complétudes journalières de saisie des rapports des AS par Antenne", 0.05, 0.62, 9.75, NAVY_TABLE, 0.38, 13);
+      const rows = idx === pagesA.length - 1 ? [headA, ...page, totalA] : [headA, ...page];
+      s.addTable(rows, { x: 0.1, y: 1.05, w: 9.65, colW: colW(9.65, weights.slice(0, nCols)), border: TABLE_BORDER, rowH: 0.28, valign: "middle", autoPage: false });
+      if (idx === pagesA.length - 1) {
+        const chartY = 1.05 + 0.3 * (rows.length + 1) + 0.15;
+        const chartH = 6.75 - (chartY - 0.62) - 0.95;
+        if (chartH >= 1.2) {
+          blockTitle(ctx, s, "Complétudes globales de saisie des rapports journaliers des Aires de Santé par Antenne", 0.05, chartY, 9.75, NAVY_TABLE, 0.36, 13);
+          const sorted = [...d.antennes].sort((a, b) => (b.completude ?? -1) - (a.completude ?? -1));
+          colChart(ctx, s, { x: 0.1, y: chartY + 0.4, w: 9.65, h: chartH }, sorted.map((u) => u.unit), sorted.map((u) => r2(u.completude)), sorted.map((u) => covColor(u.completude)), { valAxisTitle: "Complétude données", catAxisTitle: "Antenne", fmt: '0.00" %"', max: 100, min: 0 });
+          chartDrawn = true;
+        }
+      }
+      legendBar(ctx, s, 0.05, 6.82, 9.75, "CRITERES DE GRADUATION DES COMPLETUDES", LEG_COV, NAVY_TABLE, 0.26);
+      commentBox(ctx, s, completudeComment(d, d.antennes, "Antenne"), { x: 9.87, y: 0.62, w: 3.37, h: 6.75 });
+    });
+    if (!chartDrawn) {
+      const s = pptx.addSlide();
+      header(ctx, s, "Résultats Partiels : Complétude globale de saisie des rapports des AS par Antenne", { h: 0.77 });
+      frame(ctx, s, 0.05, 0.9, W - 0.1, 5.75);
+      blockTitle(ctx, s, "Complétudes globales de saisie des rapports journaliers des Aires de Santé par Antenne", 0.05, 0.9, W - 0.1, NAVY_TABLE, 0.42, 14);
+      const sorted = [...d.antennes].sort((a, b) => (b.completude ?? -1) - (a.completude ?? -1));
+      colChart(ctx, s, { x: 0.1, y: 1.35, w: W - 0.2, h: 4.75 }, sorted.map((u) => u.unit), sorted.map((u) => r2(u.completude)), sorted.map((u) => covColor(u.completude)), { valAxisTitle: "Complétude données", catAxisTitle: "Antenne", fmt: '0.00" %"', max: 100, min: 0, fontSize: sorted.length > 20 ? 8 : 9, labelFont: sorted.length > 20 ? 7 : 9 });
+      legendBar(ctx, s, 0.05, 6.1, W - 0.1, "CRITERES DE GRADUATION DES COMPLETUDES", LEG_COV, NAVY_TABLE, 0.27);
+      commentBox(ctx, s, completudeComment(d, d.antennes, "Antenne"), { x: 0.05, y: 6.72, w: W - 0.1, h: 0.5 });
+      sourceLine(s);
+    }
   }
 
   // B. Par unité (ZS/AS) : tableau journalier paginé.
@@ -797,38 +826,61 @@ function buildCouverture(ctx: Ctx, k: VaccineKey): void {
   const unitsK = k === "rr" ? d.units : d.units.filter((u) => !noPolio(u));
 
   // A. Par antenne : tableau + graphique CV + graphique perte (modèle « par province »).
+  //    Au-delà de 8 antennes, le tableau déborderait sur les graphiques : il est
+  //    alors paginé sur ses propres diapos et les graphiques suivent à part.
   if (antennesK.length > 1) {
-    const s = pptx.addSlide();
-    header(ctx, s, `Résultats Partiels : Couverture vaccinale globale ${name} et taux de perte par Antenne`, { h: 0.77 });
-    frame(ctx, s, 0.1, 0.9, 10.2, 6.5, color);
-    // Tableau
-    blockTitle(ctx, s, `Couverture vaccinale ${name} par Antenne`, 0.12, 0.92, 3.3, color, 0.36, 12);
-    const rows: PptxGenJS.TableRow[] = [
-      ["Antenne", cibleLabel, `Vaccinés ${name}`, `Couv ${name}%`].map((t) => ({ text: t, options: th(color, { fontSize: 9 }) })),
-      ...antennesK.map((u, i): PptxGenJS.TableRow => [
-        { text: u.unit, options: td({ bold: true, fontSize: 9, ...zebra(i) }) },
-        { text: fmtInt(u[k].cible), options: tdNum({ fontSize: 9, ...zebra(i) }) },
-        { text: fmtInt(u[k].vacc), options: tdNum({ fontSize: 9, ...zebra(i) }) },
-        { text: fmtNum(u[k].cv), options: tdColored(u[k].cv, "cov", { fontSize: 9 }) },
-      ]),
-      [
-        { text: "Total", options: ttotal(color, { align: "left", fontSize: 9 }) },
-        { text: fmtInt(d.total[k].cible), options: ttotal(color, { fontSize: 9 }) },
-        { text: fmtInt(d.total[k].vacc), options: ttotal(color, { fontSize: 9 }) },
-        { text: fmtNum(d.total[k].cv), options: ttotal(color, { fontSize: 9 }) },
-      ],
+    const headRow: PptxGenJS.TableRow = ["Antenne", cibleLabel, `Vaccinés ${name}`, `Couv ${name}%`].map((t) => ({ text: t, options: th(color, { fontSize: 9 }) }));
+    const bodyRows: PptxGenJS.TableRow[] = antennesK.map((u, i): PptxGenJS.TableRow => [
+      { text: u.unit, options: td({ bold: true, fontSize: 9, ...zebra(i) }) },
+      { text: fmtInt(u[k].cible), options: tdNum({ fontSize: 9, ...zebra(i) }) },
+      { text: fmtInt(u[k].vacc), options: tdNum({ fontSize: 9, ...zebra(i) }) },
+      { text: fmtNum(u[k].cv), options: tdColored(u[k].cv, "cov", { fontSize: 9 }) },
+    ]);
+    const totalRow: PptxGenJS.TableRow = [
+      { text: "Total", options: ttotal(color, { align: "left", fontSize: 9 }) },
+      { text: fmtInt(d.total[k].cible), options: ttotal(color, { fontSize: 9 }) },
+      { text: fmtInt(d.total[k].vacc), options: ttotal(color, { fontSize: 9 }) },
+      { text: fmtNum(d.total[k].cv), options: ttotal(color, { fontSize: 9 }) },
     ];
-    s.addTable(rows, { x: 0.15, y: 1.32, w: 3.25, colW: colW(3.25, [1.1, 0.8, 0.8, 0.7]), border: TABLE_BORDER, rowH: 0.26, valign: "middle", autoPage: false });
-    // Graphique CV
-    blockTitle(ctx, s, `Répartition de la couverture vaccinale (%) globale de ${name} par Antenne`, 3.5, 0.92, 6.75, color, 0.36, 12);
     const byCV = [...antennesK].sort((a, b) => (b[k].cv ?? -1) - (a[k].cv ?? -1));
-    colChart(ctx, s, { x: 3.5, y: 1.3, w: 6.75, h: 2.7 }, byCV.map((u) => u.unit), byCV.map((u) => r2(u[k].cv)), byCV.map((u) => covColor(u[k].cv)), { valAxisTitle: "Couverture vaccinale Globale", catAxisTitle: "Antenne", min: 0 });
-    // Graphique perte
-    blockTitle(ctx, s, `Répartition du taux de perte (%) du vaccin ${name} par Antenne`, 0.12, 4.05, 10.13, color, 0.36, 12);
     const byLoss = [...antennesK].sort((a, b) => (b[k].tauxPerte ?? -999) - (a[k].tauxPerte ?? -999));
-    colChart(ctx, s, { x: 0.15, y: 4.45, w: 10.1, h: 2.3 }, byLoss.map((u) => u.unit), byLoss.map((u) => r2(u[k].tauxPerte)), byLoss.map((u) => lossColor(u[k].tauxPerte)), { valAxisTitle: "Taux de perte", catAxisTitle: "Antenne" });
-    legendsBottom(ctx, s, 6.83, 0.1, 10.2, true, true, false);
-    commentBox(ctx, s, couvComment(d, k, antennesK, "Antenne"), { x: 10.4, y: 0.9, w: 2.85, h: 6.5 });
+
+    if (antennesK.length <= 8) {
+      const s = pptx.addSlide();
+      header(ctx, s, `Résultats Partiels : Couverture vaccinale globale ${name} et taux de perte par Antenne`, { h: 0.77 });
+      frame(ctx, s, 0.1, 0.9, 10.2, 6.5, color);
+      blockTitle(ctx, s, `Couverture vaccinale ${name} par Antenne`, 0.12, 0.92, 3.3, color, 0.36, 12);
+      s.addTable([headRow, ...bodyRows, totalRow], { x: 0.15, y: 1.32, w: 3.25, colW: colW(3.25, [1.1, 0.8, 0.8, 0.7]), border: TABLE_BORDER, rowH: 0.26, valign: "middle", autoPage: false });
+      blockTitle(ctx, s, `Répartition de la couverture vaccinale (%) globale de ${name} par Antenne`, 3.5, 0.92, 6.75, color, 0.36, 12);
+      colChart(ctx, s, { x: 3.5, y: 1.3, w: 6.75, h: 2.7 }, byCV.map((u) => u.unit), byCV.map((u) => r2(u[k].cv)), byCV.map((u) => covColor(u[k].cv)), { valAxisTitle: "Couverture vaccinale Globale", catAxisTitle: "Antenne", min: 0 });
+      blockTitle(ctx, s, `Répartition du taux de perte (%) du vaccin ${name} par Antenne`, 0.12, 4.05, 10.13, color, 0.36, 12);
+      colChart(ctx, s, { x: 0.15, y: 4.45, w: 10.1, h: 2.3 }, byLoss.map((u) => u.unit), byLoss.map((u) => r2(u[k].tauxPerte)), byLoss.map((u) => lossColor(u[k].tauxPerte)), { valAxisTitle: "Taux de perte", catAxisTitle: "Antenne" });
+      legendsBottom(ctx, s, 6.83, 0.1, 10.2, true, true, false);
+      commentBox(ctx, s, couvComment(d, k, antennesK, "Antenne"), { x: 10.4, y: 0.9, w: 2.85, h: 6.5 });
+    } else {
+      // Tableau paginé
+      const pagesT = chunk(bodyRows, 17);
+      pagesT.forEach((page, idx) => {
+        const s = pptx.addSlide();
+        header(ctx, s, `Résultats Partiels : Couverture vaccinale globale ${name} par Antenne — tableau${suite(idx, pagesT.length)}`, { h: 0.77 });
+        frame(ctx, s, 2.9, 0.9, 7.5, 6.3, color);
+        blockTitle(ctx, s, `Couverture vaccinale ${name} par Antenne`, 2.92, 0.92, 7.46, color, 0.4, 13);
+        const rows = idx === pagesT.length - 1 ? [headRow, ...page, totalRow] : [headRow, ...page];
+        s.addTable(rows, { x: 3.0, y: 1.45, w: 7.3, colW: colW(7.3, [2.4, 1.7, 1.7, 1.5]), border: TABLE_BORDER, rowH: 0.28, valign: "middle", autoPage: false });
+        legendsBottom(ctx, s, 6.83, 0.1, 10.2, true, false, false);
+        commentBox(ctx, s, couvComment(d, k, antennesK, "Antenne"), { x: 10.55, y: 0.9, w: 2.7, h: 6.3 });
+      });
+      // Graphiques CV + perte (toutes les antennes)
+      const s = pptx.addSlide();
+      header(ctx, s, `Résultats Partiels : Couverture vaccinale globale ${name} et taux de perte par Antenne`, { h: 0.77 });
+      frame(ctx, s, 0.1, 0.9, 10.2, 6.5, color);
+      blockTitle(ctx, s, `Répartition de la couverture vaccinale (%) globale de ${name} par Antenne`, 0.12, 0.92, 10.16, color, 0.36, 12);
+      colChart(ctx, s, { x: 0.15, y: 1.3, w: 10.1, h: 2.6 }, byCV.map((u) => u.unit), byCV.map((u) => r2(u[k].cv)), byCV.map((u) => covColor(u[k].cv)), { valAxisTitle: "Couverture vaccinale Globale", catAxisTitle: "Antenne", min: 0, fontSize: 8, labelFont: 7 });
+      blockTitle(ctx, s, `Répartition du taux de perte (%) du vaccin ${name} par Antenne`, 0.12, 4.05, 10.16, color, 0.36, 12);
+      colChart(ctx, s, { x: 0.15, y: 4.45, w: 10.1, h: 2.3 }, byLoss.map((u) => u.unit), byLoss.map((u) => r2(u[k].tauxPerte)), byLoss.map((u) => lossColor(u[k].tauxPerte)), { valAxisTitle: "Taux de perte", catAxisTitle: "Antenne", fontSize: 8, labelFont: 7 });
+      legendsBottom(ctx, s, 6.83, 0.1, 10.2, true, true, false);
+      commentBox(ctx, s, couvComment(d, k, antennesK, "Antenne"), { x: 10.4, y: 0.9, w: 2.85, h: 6.5 });
+    }
   }
 
   // B. Par unité (ZS/AS) : deux graphiques (CV, perte) — modèle « par antenne ».
@@ -1030,7 +1082,9 @@ function buildRecup(ctx: Ctx): void {
   };
 
   // A. Vue par antenne : récupérés, identifiés et % de récupération sur une diapo.
-  if (d.antennes.length > 1) {
+  //    Au-delà de 6 antennes, les trois tableaux empilés déborderaient : chaque
+  //    tableau passe alors sur sa propre diapo (paginée).
+  if (d.antennes.length > 1 && d.antennes.length <= 6) {
     const s = pptx.addSlide();
     header(ctx, s, "Résultats Partiels : Récupération PEV de routine par Antenne", { h: 0.49 });
     frame(ctx, s, 0.05, 0.6, W - 0.1, 5.35, MAPI_BLUE);
@@ -1040,6 +1094,28 @@ function buildRecup(ctx: Ctx): void {
     drawTable(s, rowsFor(d.antennes, "Antenne", selPct, true), y, "3. Taux de récupération (récupérés ÷ identifiés) par Antenne");
     commentBox(ctx, s, recupComment(d), { x: 0.05, y: 6.05, w: W - 0.1, h: 0.85 });
     sourceLine(s);
+  } else if (d.antennes.length > 6) {
+    const sections: { sel: Sel; isPct: boolean; title: string }[] = [
+      { sel: selRecup, isPct: false, title: "1. Données de récupération des enfants au PEV de routine par Antenne (récupérés)" },
+      { sel: selIdent, isPct: false, title: "2. Enfants et femmes enceintes identifiés pour récupération par Antenne" },
+      { sel: selPct, isPct: true, title: "3. Taux de récupération (récupérés ÷ identifiés) par Antenne" },
+    ];
+    for (const sec of sections) {
+      const all = rowsFor(d.antennes, "Antenne", sec.sel, sec.isPct);
+      const h0 = all[0];
+      const b0 = all.slice(1, -1);
+      const t0 = all[all.length - 1];
+      const pagesA = chunk(b0, 15);
+      pagesA.forEach((page, idx) => {
+        const s = pptx.addSlide();
+        header(ctx, s, `Résultats Partiels : Récupération PEV de routine par Antenne${suite(idx, pagesA.length)}`, { h: 0.49 });
+        frame(ctx, s, 0.05, 0.6, W - 0.1, 5.35, MAPI_BLUE);
+        const rows = idx === pagesA.length - 1 ? [h0, ...page, t0] : [h0, ...page];
+        drawTable(s, rows, 0.62, sec.title);
+        commentBox(ctx, s, recupComment(d), { x: 0.05, y: 6.05, w: W - 0.1, h: 0.85 });
+        sourceLine(s);
+      });
+    }
   }
 
   // B. Vue par unité (ZS/AS) : récupérés (paginé).

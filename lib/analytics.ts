@@ -79,6 +79,9 @@ export function scopeLabel(f: Filters, province = "Kasaï Central"): string {
   if (f.as) return `Aire de Santé : ${f.as}`;
   if (f.zs) return `Zone de Santé : ${f.zs}`;
   if (f.antenne) return `Antenne : ${f.antenne}`;
+  // Au-delà de 3 provinces, on reprend le style du rapport national Bloc 3
+  // (le nom de fichier et les titres n'énumèrent plus toutes les provinces).
+  if (f.provinces.length > 3) return `Campagne integree Bloc3 Aout 2026 J1-J5 (${f.provinces.length} provinces)`;
   if (f.provinces.length > 1) return `Provinces : ${f.provinces.map(prettyName).join(", ")}`;
   return `Province : ${province}`;
 }
