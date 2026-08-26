@@ -7,7 +7,7 @@
 import { MASQUE_SCHEMA, type ASRecord, type MasqueData } from "./parse-masque";
 
 /** Version du format des blocs DHIS2 mis en cache (KV) — à incrémenter si la structure change. */
-export const DHIS2_BLOCK_SCHEMA = 2;
+export const DHIS2_BLOCK_SCHEMA = 3;
 
 export const JOUR_LABELS = ["J1", "J2", "J3", "J4", "J5", "Ratissage"];
 export const NB_JOURS = JOUR_LABELS.length;

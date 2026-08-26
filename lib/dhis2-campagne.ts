@@ -123,8 +123,8 @@ const PEV_DE: Record<string, string> = {
   TD4: "uryaNxO3R1F", TD5: "x3AP46l37ge",
 };
 
+/** DE cumulables (les cibles sont traitées à part : déduplication par FOSA/AS). */
 const ALL_DE: string[] = [
-  CIBLE_RR_DE, CIBLE_POLIO_DE,
   ...ALL_AGE_DE,
   FLACON_DE.nvpo2, FLACON_DE.vpob, FLACON_DE.rr,
   SURV_DE.pfa, SURV_DE.rougeole, SURV_DE.fj, SURV_DE.tnn,
@@ -194,20 +194,56 @@ export async function listCampaignProvinces(): Promise<ProvinceInfo[]> {
     organisationUnits: { id: string; name: string }[];
   };
   const names = new Map(meta.organisationUnits.map((o) => [o.id, cleanName(o.name)]));
-  const dx = [CIBLE_RR_DE, CIBLE_POLIO_DE, ...ALL_AGE_DE].join(";");
-  const { rows, col } = await analytics([`dx:${dx}`, "ou:LEVEL-2", "pe:202607;202608;202609"]);
+
+  // Vaccinés : cumul mensuel classique par province.
+  const { rows, col } = await analytics([`dx:${ALL_AGE_DE.join(";")}`, "ou:LEVEL-2", "pe:202607;202608;202609"]);
   const acc = new Map<string, { cibleRR: number; ciblePolio: number; rrVacc: number; polioVacc: number }>();
-  for (const r of rows) {
-    const ou = r[col.ou];
-    const de = r[col.dx];
-    const v = parseFloat(r[col.value]) || 0;
+  const get = (ou: string) => {
     let a = acc.get(ou);
     if (!a) { a = { cibleRR: 0, ciblePolio: 0, rrVacc: 0, polioVacc: 0 }; acc.set(ou, a); }
-    if (de === CIBLE_RR_DE) a.cibleRR += v;
-    else if (de === CIBLE_POLIO_DE) a.ciblePolio += v;
-    else if (POLIO_AGE_DE.has(de)) a.polioVacc += v;
+    return a;
+  };
+  for (const r of rows) {
+    const a = get(r[col.ou]);
+    const v = parseFloat(r[col.value]) || 0;
+    if (POLIO_AGE_DE.has(r[col.dx])) a.polioVacc += v;
     else a.rrVacc += v;
   }
+
+  // Cibles : même déduplication que buildProvinceBlock (max par FOSA, valeurs
+  // distinctes par AS) — la somme brute doublait le Sud Kivu / Nord Kivu.
+  const qc = await analytics([`dx:${CIBLE_RR_DE};${CIBLE_POLIO_DE}`, "ou:LEVEL-5", `pe:${dailyPeriods().join(";")}`]);
+  const fosas = (await dhis(`/organisationUnits.json?level=5&fields=id,path&paging=false`)) as {
+    organisationUnits: { id: string; path: string }[];
+  };
+  const pathOf = new Map(fosas.organisationUnits.map((f) => [f.id, f.path]));
+  const fosaMax = new Map<string, { rr: number; polio: number }>();
+  for (const r of qc.rows) {
+    const fosa = r[qc.col.ou];
+    const v = parseFloat(r[qc.col.value]) || 0;
+    let m = fosaMax.get(fosa);
+    if (!m) { m = { rr: 0, polio: 0 }; fosaMax.set(fosa, m); }
+    if (r[qc.col.dx] === CIBLE_RR_DE) m.rr = Math.max(m.rr, v);
+    else m.polio = Math.max(m.polio, v);
+  }
+  const asVals = new Map<string, { prov: string; rr: Set<number>; polio: Set<number> }>();
+  for (const [fosa, m] of fosaMax) {
+    // path = /pays/province/zs/as/fosa
+    const seg = (pathOf.get(fosa) ?? "").split("/").filter(Boolean);
+    if (seg.length < 4) continue;
+    const prov = seg[1];
+    const as = seg[3];
+    let a = asVals.get(as);
+    if (!a) { a = { prov, rr: new Set(), polio: new Set() }; asVals.set(as, a); }
+    if (m.rr > 0) a.rr.add(m.rr);
+    if (m.polio > 0) a.polio.add(m.polio);
+  }
+  for (const a of asVals.values()) {
+    const p = get(a.prov);
+    for (const v of a.rr) p.cibleRR += v;
+    for (const v of a.polio) p.ciblePolio += v;
+  }
+
   const out: ProvinceInfo[] = [];
   for (const [id, a] of acc) {
     if (a.cibleRR <= 0 && a.rrVacc <= 0 && a.polioVacc <= 0) continue;
@@ -225,12 +261,15 @@ export async function listCampaignProvinces(): Promise<ProvinceInfo[]> {
 export async function buildProvinceBlock(provinceId: string): Promise<ProvinceBlock> {
   // 1. Hiérarchie : province, ZS (niveau 3), AS (niveau 4).
   const ous = (await dhis(
-    `/organisationUnits.json?filter=path:like:${provinceId}&filter=level:in:[2,3,4]&fields=id,name,level,parent[id]&paging=false`
+    `/organisationUnits.json?filter=path:like:${provinceId}&filter=level:in:[2,3,4,5]&fields=id,name,level,parent[id]&paging=false`
   )) as { organisationUnits: { id: string; name: string; level: number; parent?: { id: string } }[] };
   const units = ous.organisationUnits ?? [];
   const provName = cleanName(units.find((u) => u.level === 2 && u.id === provinceId)?.name ?? provinceId);
   const zsName = new Map<string, string>();
   for (const u of units) if (u.level === 3) zsName.set(u.id, cleanName(u.name));
+  /** FOSA (niveau 5) → Aire de Santé parente. */
+  const fosaParent = new Map<string, string>();
+  for (const u of units) if (u.level === 5 && u.parent?.id) fosaParent.set(u.id, u.parent.id);
 
   const records = new Map<string, ASRecord>();
   const polioSeen = new Set<string>();
@@ -262,9 +301,6 @@ export async function buildProvinceBlock(provinceId: string): Promise<ProvinceBl
     const coc = row[q1.col.co];
     const val = parseFloat(row[q1.col.value]) || 0;
     if (!val) continue;
-
-    if (de === CIBLE_RR_DE) { r.cibleRR += val; continue; }
-    if (de === CIBLE_POLIO_DE) { polioSeen.add(row[q1.col.ou]); continue; }
 
     let handled = false;
     for (const key of ["nvpo2", "vpob", "rr"] as const) {
@@ -318,8 +354,41 @@ export async function buildProvinceBlock(provinceId: string): Promise<ProvinceBl
     }
   }
 
-  // 3. Détail journalier (vaccinés par jour, complétude, détection du J1 provincial).
+  // 2 bis. Cibles — convention du tableau de bord officiel (vérifiée le 26/08 sur
+  //    le Power BI Bloc 3) : la cible est SAISIE PAR FOSA et ne s'additionne pas
+  //    aveuglément — au Sud Kivu (231 AS) et au Nord Kivu, plusieurs FOSA d'une
+  //    même AS ont chacune saisi la cible de TOUTE l'AS, parfois sur plusieurs
+  //    jours (la somme brute donnait 7,35 M au lieu de ~4,37 M au Sud Kivu).
+  //    Règle : max par FOSA (tous jours), puis somme des valeurs DISTINCTES par
+  //    AS — exacte pour Kasaï Or./Lomami/Maniema/Sankuru, ±1 % pour SK/NK.
   const periods = dailyPeriods();
+  {
+    const q3 = await analytics([`dx:${CIBLE_RR_DE};${CIBLE_POLIO_DE}`, `ou:LEVEL-5;${provinceId}`, `pe:${periods.join(";")}`]);
+    const fosaMax = new Map<string, { rr: number; polio: number }>();
+    for (const row of q3.rows) {
+      const fosa = row[q3.col.ou];
+      const val = parseFloat(row[q3.col.value]) || 0;
+      let m = fosaMax.get(fosa);
+      if (!m) { m = { rr: 0, polio: 0 }; fosaMax.set(fosa, m); }
+      if (row[q3.col.dx] === CIBLE_RR_DE) m.rr = Math.max(m.rr, val);
+      else m.polio = Math.max(m.polio, val);
+    }
+    const asVals = new Map<string, { rr: Set<number>; polio: Set<number> }>();
+    for (const [fosa, m] of fosaMax) {
+      const as = fosaParent.get(fosa) ?? fosa; // valeur saisie directement à l'AS
+      let a = asVals.get(as);
+      if (!a) { a = { rr: new Set(), polio: new Set() }; asVals.set(as, a); }
+      if (m.rr > 0) a.rr.add(m.rr);
+      if (m.polio > 0) a.polio.add(m.polio);
+    }
+    for (const [as, a] of asVals) {
+      const r = records.get(as);
+      if (!r) continue;
+      for (const v of a.rr) r.cibleRR += v;
+      if (a.polio.size > 0) polioSeen.add(as);
+    }
+  }
+
   const q2 = await analytics([`dx:${ALL_AGE_DE.join(";")}`, `ou:LEVEL-4;${provinceId}`, `pe:${periods.join(";")}`]);
   const byDay = new Map<string, number>();
   for (const row of q2.rows) {
